@@ -5,16 +5,9 @@ if not app_root and plugin_root and plugin_root:match("^plugins/[^/]+%.koplugin$
     app_root = "."
 end
 
-local function prependPackagePath(path)
-    if not package.path:find(path, 1, true) then
-        package.path = path .. ";" .. package.path
-    end
-end
-
-prependPackagePath(plugin_root .. "/?.lua")
-prependPackagePath(plugin_root .. "/?/init.lua")
-prependPackagePath(plugin_root .. "/dependencies/?.lua")
-prependPackagePath(plugin_root .. "/dependencies/?/init.lua")
+-- Dependencies (xml2lua, openssl bindings) live in a subdirectory not covered
+-- by the pluginloader's standard plugin_root/?.lua entries.
+package.path = plugin_root .. "/dependencies/?.lua;" .. package.path
 
 local function compactCandidates(list)
     local compacted = {}
@@ -313,30 +306,25 @@ function ACSM:openFile(file)
     end
 
     Trapper:wrap(function()
-        local ok, err = xpcall(function()
-            Trapper:info(T(_("Preparing %1"), file), false, true)
-            local result, fulfill_err = self:fulfillLoan(file, output_path)
-            if not result then
-                error(fulfill_err)
-            end
-
-            if self.ui.file_chooser then
-                self.ui.file_chooser:refreshPath()
-            end
-
-            Trapper:clear()
-            UIManager:nextTick(function()
-                self:openGeneratedBook(result.outputPath)
-            end)
-        end, debug.traceback)
-
-        if not ok then
-            logger.warn("[ACSM] Processing failed:", err)
+        Trapper:info(T(_("Preparing %1"), file), false, true)
+        local result, fulfill_err = self:fulfillLoan(file, output_path)
+        if not result then
+            logger.warn("[ACSM] Processing failed:", fulfill_err)
             Trapper:reset()
             UIManager:show(InfoMessage:new{
-                text = T(_("ACSM processing failed:\n%1"), trimError(err)),
+                text = T(_("ACSM processing failed:\n%1"), trimError(fulfill_err)),
             })
+            return
         end
+
+        if self.ui.file_chooser then
+            self.ui.file_chooser:refreshPath()
+        end
+
+        Trapper:clear()
+        UIManager:nextTick(function()
+            self:openGeneratedBook(result.outputPath)
+        end)
     end)
 end
 
