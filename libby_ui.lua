@@ -70,7 +70,7 @@ end
 local function dedupeStrings(values)
     local items = {}
     local seen = {}
-    for _, value in ipairs(values or {}) do
+    for value_index, value in ipairs(values or {}) do
         value = tostring(value or "")
         if value ~= "" and not seen[value] then
             items[#items + 1] = value
@@ -83,7 +83,7 @@ end
 local function chunkList(values, chunk_size)
     local chunks = {}
     local current = {}
-    for _, value in ipairs(values or {}) do
+    for value_index, value in ipairs(values or {}) do
         current[#current + 1] = value
         if #current >= chunk_size then
             chunks[#chunks + 1] = current
@@ -341,7 +341,7 @@ end
 
 function LibbyUI:getCardById(card_id)
     local sync_state = self:getSyncState()
-    for _, card in ipairs(sync_state.cards or {}) do
+    for card_index, card in ipairs(sync_state.cards or {}) do
         if card.cardId == card_id then
             return card
         end
@@ -353,7 +353,7 @@ function LibbyUI:getLibraryByWebsiteId(website_id)
     if website_id == nil then
         return nil
     end
-    for _, library in ipairs(self:getLibraries()) do
+    for library_index, library in ipairs(self:getLibraries()) do
         if tostring(library.websiteId) == tostring(website_id) then
             return library
         end
@@ -362,7 +362,7 @@ function LibbyUI:getLibraryByWebsiteId(website_id)
 end
 
 function LibbyUI:getLibraryByKey(library_key)
-    for _, library in ipairs(self:getLibraries()) do
+    for library_index, library in ipairs(self:getLibraries()) do
         if tostring(library.preferredKey or library.advantageKey or "") == tostring(library_key or "") then
             return library
         end
@@ -383,13 +383,13 @@ function LibbyUI:getCardsForLibraryKey(library_key)
     local cards = {}
     local website_ids = {}
 
-    for _, library in ipairs(self:getLibraries(sync_state)) do
+    for library_index, library in ipairs(self:getLibraries(sync_state)) do
         if tostring(library.preferredKey or "") == tostring(library_key or "") then
             website_ids[tostring(library.websiteId)] = true
         end
     end
 
-    for _, card in ipairs(sync_state.cards or {}) do
+    for card_index, card in ipairs(sync_state.cards or {}) do
         local website_id = util.tableGetValue(card, "library", "websiteId") or card.websiteId
         if card.advantageKey == library_key or website_ids[tostring(website_id or "")] then
             cards[#cards + 1] = card
@@ -405,11 +405,11 @@ end
 function LibbyUI:getAvailableSearchLibraryKeys(sync_state)
     sync_state = sync_state or self:getSyncState()
     local keys = {}
-    for _, library in ipairs(self:getLibraries(sync_state)) do
+    for library_index, library in ipairs(self:getLibraries(sync_state)) do
         keys[#keys + 1] = library.preferredKey or library.advantageKey
     end
     if #keys == 0 then
-        for _, card in ipairs(sync_state.cards or {}) do
+        for card_index, card in ipairs(sync_state.cards or {}) do
             keys[#keys + 1] = card.advantageKey
         end
     end
@@ -421,12 +421,12 @@ end
 function LibbyUI:normalizeSelectedSearchLibraries(sync_state)
     local available = self:getAvailableSearchLibraryKeys(sync_state)
     local available_set = {}
-    for _, key in ipairs(available) do
+    for key_index, key in ipairs(available) do
         available_set[key] = true
     end
 
     local selected = {}
-    for _, key in ipairs(self.store:getSelectedSearchLibraries() or {}) do
+    for key_index, key in ipairs(self.store:getSelectedSearchLibraries() or {}) do
         if available_set[key] then
             selected[#selected + 1] = key
         end
@@ -448,7 +448,7 @@ end
 
 function LibbyUI:getSelectedSearchLibraries(sync_state)
     local selected = {}
-    for _, key in ipairs(self:normalizeSelectedSearchLibraries(sync_state)) do
+    for key_index, key in ipairs(self:normalizeSelectedSearchLibraries(sync_state)) do
         selected[#selected + 1] = key
     end
     return selected
@@ -474,7 +474,7 @@ end
 function LibbyUI:toggleSearchLibrary(library_key)
     local selected, available = self:normalizeSelectedSearchLibraries()
     local selected_set = {}
-    for _, key in ipairs(selected) do
+    for key_index, key in ipairs(selected) do
         selected_set[key] = true
     end
 
@@ -486,7 +486,7 @@ function LibbyUI:toggleSearchLibrary(library_key)
             return
         end
         local remaining = {}
-        for _, key in ipairs(selected) do
+        for key_index, key in ipairs(selected) do
             if key ~= library_key then
                 remaining[#remaining + 1] = key
             end
@@ -546,12 +546,12 @@ function LibbyUI:getSearchLibraryMenuItems()
         end,
     }
 
-    for _, library_key in ipairs(available) do
+    for library_index, library_key in ipairs(available) do
         items[#items + 1] = {
             text = self:getSearchLibraryLabel(library_key),
             checked_func = function()
                 local current_selected = self:getSelectedSearchLibraries()
-                for _, key in ipairs(current_selected) do
+                for key_index, key in ipairs(current_selected) do
                     if key == library_key then
                         return true
                     end
@@ -589,13 +589,13 @@ end
 function LibbyUI:buildLoanMenuItems()
     local sync_state = self:getSyncState()
     local loans = {}
-    for _, loan in ipairs(sync_state.loans or {}) do
+    for loan_index, loan in ipairs(sync_state.loans or {}) do
         loans[#loans + 1] = loan
     end
     sortLoans(loans)
 
     local items = {}
-    for _, loan in ipairs(loans) do
+    for loan_index, loan in ipairs(loans) do
         local card = self:getCardById(loan.cardId)
         local library = self:getCardLibrary(card)
         items[#items + 1] = {
@@ -618,13 +618,13 @@ end
 function LibbyUI:buildHoldMenuItems()
     local sync_state = self:getSyncState()
     local holds = {}
-    for _, hold in ipairs(sync_state.holds or {}) do
+    for hold_index, hold in ipairs(sync_state.holds or {}) do
         holds[#holds + 1] = hold
     end
     sortHolds(holds)
 
     local items = {}
-    for _, hold in ipairs(holds) do
+    for hold_index, hold in ipairs(holds) do
         local card = self:getCardById(hold.cardId)
         local library = self:getCardLibrary(card)
         items[#items + 1] = {
@@ -666,7 +666,7 @@ end
 function LibbyUI:buildSearchMenuItems()
     local results = self.state.search_results or {}
     local items = {}
-    for _, media in ipairs(results) do
+    for media_index, media in ipairs(results) do
         local best_site = self:getBestSearchSite(media)
         items[#items + 1] = {
             text = mediaTitle(media) .. "\n" .. mediaAuthor(media),
@@ -947,7 +947,7 @@ function LibbyUI:showHoldActions(hold)
 end
 
 function LibbyUI:hasLoan(title_id, card_id)
-    for _, loan in ipairs(self:getSyncState().loans or {}) do
+    for loan_index, loan in ipairs(self:getSyncState().loans or {}) do
         if tostring(loan.id) == tostring(title_id) and tostring(loan.cardId) == tostring(card_id) then
             return true
         end
@@ -956,7 +956,7 @@ function LibbyUI:hasLoan(title_id, card_id)
 end
 
 function LibbyUI:hasHold(title_id, card_id)
-    for _, hold in ipairs(self:getSyncState().holds or {}) do
+    for hold_index, hold in ipairs(self:getSyncState().holds or {}) do
         if tostring(hold.id) == tostring(title_id) and tostring(hold.cardId) == tostring(card_id) then
             return true
         end
@@ -1090,7 +1090,7 @@ end
 
 function LibbyUI:fetchLibraryMetadata(sync_state)
     local website_ids = {}
-    for _, card in ipairs(sync_state.cards or {}) do
+    for card_index, card in ipairs(sync_state.cards or {}) do
         website_ids[#website_ids + 1] = util.tableGetValue(card, "library", "websiteId") or card.websiteId
     end
     website_ids = dedupeStrings(website_ids)
@@ -1111,7 +1111,7 @@ function LibbyUI:fetchLibraryMetadata(sync_state)
         if not response then
             return nil, err
         end
-        for _, item in ipairs(response.items or {}) do
+        for item_index, item in ipairs(response.items or {}) do
             libraries[#libraries + 1] = item
         end
     end
@@ -1338,7 +1338,7 @@ function LibbyUI:returnLoan(loan)
     Trapper:wrap(function()
         Trapper:info(_("Returning loan..."), false, true)
         local client = self:createClient()
-        local _, err = client:returnLoan(loan)
+        local err = select(2, client:returnLoan(loan))
         if err then
             Trapper:reset()
             UIManager:show(InfoMessage:new{
@@ -1389,7 +1389,7 @@ function LibbyUI:renewLoan(loan)
     Trapper:wrap(function()
         Trapper:info(_("Renewing loan..."), false, true)
         local client = self:createClient()
-        local _, err = client:renewLoan(loan, self:getCardById(loan.cardId))
+        local err = select(2, client:renewLoan(loan, self:getCardById(loan.cardId)))
         if err then
             Trapper:reset()
             UIManager:show(InfoMessage:new{
@@ -1433,7 +1433,7 @@ function LibbyUI:cancelHold(hold)
     Trapper:wrap(function()
         Trapper:info(_("Canceling hold..."), false, true)
         local client = self:createClient()
-        local _, err = client:cancelHold(hold)
+        local err = select(2, client:cancelHold(hold))
         if err then
             Trapper:reset()
             UIManager:show(InfoMessage:new{
@@ -1475,7 +1475,7 @@ function LibbyUI:borrowHold(hold)
     Trapper:wrap(function()
         Trapper:info(_("Borrowing hold..."), false, true)
         local client = self:createClient()
-        local _, err = client:borrowMedia(hold, card, hold)
+        local err = select(2, client:borrowMedia(hold, card, hold))
         if err then
             Trapper:reset()
             UIManager:show(InfoMessage:new{
@@ -1508,13 +1508,13 @@ function LibbyUI:normalizeSearchResults(results)
     end
 
     local normalized = {}
-    for _, item in ipairs(items) do
+    for item_index, item in ipairs(items) do
         local media = util.tableDeepCopy(item)
         if (type(media.formats) ~= "table" or #media.formats == 0) and type(media.siteAvailabilities) == "table" then
             local formats = {}
             local seen_format_ids = {}
-            for _, site in pairs(media.siteAvailabilities) do
-                for _, format in ipairs(site.formats or {}) do
+            for site_key, site in pairs(media.siteAvailabilities) do
+                for format_index, format in ipairs(site.formats or {}) do
                     if format.id and not seen_format_ids[format.id] then
                         formats[#formats + 1] = format
                         seen_format_ids[format.id] = true
@@ -1597,7 +1597,7 @@ function LibbyUI:borrowSearchMedia(media, card, availability)
     Trapper:wrap(function()
         Trapper:info(_("Borrowing title..."), false, true)
         local client = self:createClient()
-        local _, err = client:borrowMedia(media, card, availability)
+        local err = select(2, client:borrowMedia(media, card, availability))
         if err then
             Trapper:reset()
             UIManager:show(InfoMessage:new{
@@ -1631,7 +1631,7 @@ function LibbyUI:createHoldFromSearch(media, card)
     Trapper:wrap(function()
         Trapper:info(_("Placing hold..."), false, true)
         local client = self:createClient()
-        local _, err = client:createHold(media.id, card.cardId)
+        local err = select(2, client:createHold(media.id, card.cardId))
         if err then
             Trapper:reset()
             UIManager:show(InfoMessage:new{
