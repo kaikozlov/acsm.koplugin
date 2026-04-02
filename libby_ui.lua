@@ -853,9 +853,9 @@ function LibbyUI:showSearchResultDetails(media)
     if publisher then
         lines[#lines + 1] = T(_("Publisher: %1"), tostring(publisher))
     end
-    for _, site in ipairs(self:getSearchSites(media, true)) do
-        local name = site.library and site.library.name or site.advantageKey
-        lines[#lines + 1] = T(_("%1: %2"), tostring(name), availabilityText(site))
+    for site_index, site_info in ipairs(self:getSearchSites(media, true)) do
+        local name = site_info.library and site_info.library.name or site_info.advantageKey
+        lines[#lines + 1] = T(_("%1: %2"), tostring(name), availabilityText(site_info))
     end
     UIManager:show(InfoMessage:new{
         text = table.concat(lines, "\n"),
@@ -972,29 +972,29 @@ function LibbyUI:showSearchResultActions(media)
     local dialog
     local buttons = {}
 
-    for _, site in ipairs(self:getSearchSites(media, true)) do
-        for _, card in ipairs(site.cards or {}) do
-            local card_label = tostring(card.advantageKey or site.advantageKey)
-            if card.cardName and card.cardName ~= "" then
-                card_label = card_label .. ": " .. tostring(card.cardName)
+    for site_index, site_info in ipairs(self:getSearchSites(media, true)) do
+        for card_index, card_info in ipairs(site_info.cards or {}) do
+            local card_label = tostring(card_info.advantageKey or site_info.advantageKey)
+            if card_info.cardName and card_info.cardName ~= "" then
+                card_label = card_label .. ": " .. tostring(card_info.cardName)
             end
-            if OverDriveClient.isSiteAvailable(site) then
+            if OverDriveClient.isSiteAvailable(site_info) then
                 buttons[#buttons + 1] = {{
                     text = T(_("Borrow from %1"), card_label),
-                    enabled = LibbyClient.canBorrow(card) and not self:hasLoan(media.id, card.cardId),
+                    enabled = LibbyClient.canBorrow(card_info) and not self:hasLoan(media.id, card_info.cardId),
                     callback = function()
                         UIManager:close(dialog)
-                        self:borrowSearchMedia(media, card, site)
+                        self:borrowSearchMedia(media, card_info, site_info)
                     end,
                     align = "left",
                 }}
             else
                 buttons[#buttons + 1] = {{
                     text = T(_("Place hold at %1"), card_label),
-                    enabled = LibbyClient.canPlaceHold(card) and not self:hasHold(media.id, card.cardId),
+                    enabled = LibbyClient.canPlaceHold(card_info) and not self:hasHold(media.id, card_info.cardId),
                     callback = function()
                         UIManager:close(dialog)
-                        self:createHoldFromSearch(media, card)
+                        self:createHoldFromSearch(media, card_info)
                     end,
                     align = "left",
                 }}
@@ -1106,11 +1106,11 @@ function LibbyUI:fetchLibraryMetadata(sync_state)
 
     local client = self:createOverDriveClient()
     local libraries = {}
-    for _, website_id_chunk in ipairs(chunkList(website_ids, OverDriveClient.MAX_PER_PAGE)) do
+    for chunk_index, website_id_chunk_ids in ipairs(chunkList(website_ids, OverDriveClient.MAX_PER_PAGE)) do
         Trapper:info(_("Refreshing linked library metadata..."), false, true)
         local response, err = client:libraries{
-            website_ids = website_id_chunk,
-            per_page = math.max(#website_id_chunk, 1),
+            website_ids = website_id_chunk_ids,
+            per_page = math.max(#website_id_chunk_ids, 1),
         }
         if not response then
             return nil, err

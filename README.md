@@ -9,6 +9,12 @@ A KOReader plugin that lets you borrow ebooks from your public library and read 
    - Kobo: `/.adds/koreader/plugins/`
 2. Restart KOReader
 
+### Build
+
+Run `./build-plugin.sh` to create `dist/acsm.koplugin.zip`.
+
+The build only includes tracked `*.lua` files under `acsm.koplugin/`, which keeps `REFERENCE/` and other repository-only files out of the release archive.
+
 ### Usage
 
 1. Borrow an ebook from your library and download the `.acsm` file. In Libby: **Shelf → Manage Loan → Read With... → Other Options → EPUB**
