@@ -1,13 +1,16 @@
 local adobe = {}
 
 -- load required modules
-local http   = require("socket.http")       -- HTTP(S)
-local url    = require("socket.url")        -- URL manipulation
-local util   = require("adobe.util.util")   -- basic utility functions
-local crypto = require("adobe.util.crypto") -- crypto helper
-local xml    = require("adobe.util.xml")    -- xml helper
+local http = require("socket.http")
+local ltn12 = require("ltn12")
+local socket = require("socket")
+local socketutil = require("socketutil")
+local url = require("socket.url")
+
+local util = require("adobe.util.util")
+local crypto = require("adobe.util.crypto")
+local xml = require("adobe.util.xml")
 local base64 = require("adobe.util.util").base64
-local ltn12  = require("ltn12")             -- HTTP(S) request/response
 
 -- Eden2 activation service 
 adobe.EDEN_URL = url.parse("https://adeactivate.adobe.com/adept")
@@ -23,6 +26,45 @@ adobe.VERSIONS = {
 
 -- default to 2.0.1
 adobe.VERSION = adobe.VERSIONS[2]
+
+local function requestToString(request)
+    local sink, resp = socketutil.table_sink({})
+    request.sink = sink
+    request.headers = request.headers or {}
+    request.headers["User-Agent"] = request.headers["User-Agent"] or socketutil.USER_AGENT
+
+    socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
+    local ok, code = pcall(function()
+        return socket.skip(1, http.request(request))
+    end)
+    socketutil:reset_timeout()
+    if not ok then
+        error(code)
+    end
+    local body = table.concat(resp)
+    if body == "" and not code then
+        error("request failed")
+    end
+    return body, code
+end
+
+local function adeptGet(endpoint)
+    return requestToString({
+        url = endpoint,
+    })
+end
+
+local function adeptPost(endpoint, body)
+    return requestToString({
+        url = endpoint,
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "application/vnd.adobe.adept+xml",
+            ["Content-Length"] = tostring(#body),
+        },
+        source = ltn12.source.string(body),
+    })
+end
 
 
 function adobe.serializeActivation(creds, deviceUUID, fingerprint, authCert, activationURL)
@@ -73,7 +115,7 @@ end
 
 -- get information about the authentication service
 function adobe.getAuthenticationServiceInfo()
-    local response = http.request(url.build(util.endpoint(adobe.EDEN_URL, "AuthenticationServiceInfo")))
+    local response = adeptGet(url.build(util.endpoint(adobe.EDEN_URL, "AuthenticationServiceInfo")))
     local info = xml.deserialize(response).authenticationServiceInfo
 
     -- parse the methods into a nicer table
@@ -104,15 +146,7 @@ function adobe.signIn(method, username, password, authCert)
         encryptedPrivateLicenseKey = base64.encode(deviceKey:encrypt(licenseKey:topkcs8()))
     }, "signIn")
 
-    local resp = {}
-    http.request{
-        url = url.build(util.endpoint(adobe.EDEN_URL, "SignInDirect")),
-        sink = ltn12.sink.table(resp),
-        method = "POST",
-        headers = { ["Content-Type"] = "application/vnd.adobe.adept+xml" },
-        source = ltn12.source.string(signInRequest)
-    }
-    resp = table.concat(resp)
+    local resp = adeptPost(url.build(util.endpoint(adobe.EDEN_URL, "SignInDirect")), signInRequest)
     resp = xml.deserialize(resp)
 
     if resp.error ~= nil then
@@ -171,16 +205,8 @@ function adobe.activate(user, deviceKey, pkcs12)
         user = user
     })
 
-    local resp = {}
-    http.request{
-         url = url.build(util.endpoint(adobe.EDEN_URL, "Activate")),
-         sink = ltn12.sink.table(resp),
-         method = "POST",
-         headers = { ["Content-Type"] = "application/vnd.adobe.adept+xml" },
-         source = ltn12.source.string(activationRequest)
-    }
-    resp = table.concat(resp)
-    resp = xml.deserialize(resp) 
+    local resp = adeptPost(url.build(util.endpoint(adobe.EDEN_URL, "Activate")), activationRequest)
+    resp = xml.deserialize(resp)
     if resp.error ~= nil then
         error("Server returned error: " .. resp.error._attr.data)
     end

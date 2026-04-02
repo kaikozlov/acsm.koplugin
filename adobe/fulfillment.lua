@@ -1,18 +1,19 @@
 local fulfillment = {}
 
 local http = require("socket.http")
-local url = require("socket.url")
 local ltn12 = require("ltn12")
-local xml2lua = require("xml2lua")
-local domhandler = require("xmlhandler.dom")
 local logger = require("logger")
+local socket = require("socket")
+local socketutil = require("socketutil")
+local koutil = require("util")
 
-local util = require("adobe.util.util")
-local crypto = require("adobe.util.crypto")
-local xml = require("adobe.util.xml")
 local adobe = require("adobe.adobe")
+local crypto = require("adobe.util.crypto")
+local dom = require("adobe.util.dom")
 local epub = require("adobe.epub")
 local nativecrypto = require("adobe.util.nativecrypto")
+local util = require("adobe.util.util")
+local xml = require("adobe.util.xml")
 
 local ADEPT = "http://ns.adobe.com/adept"
 local ASN_NS_TAG = 1
@@ -21,150 +22,47 @@ local ASN_END_TAG = 3
 local ASN_TEXT = 4
 local ASN_ATTRIBUTE = 5
 
-local function shellQuote(s)
-    return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
-end
+local function requestToString(request)
+    local sink, resp = socketutil.table_sink({})
+    request.sink = sink
+    request.headers = request.headers or {}
+    request.headers["User-Agent"] = request.headers["User-Agent"] or socketutil.USER_AGENT
 
-local function xmlEscape(s)
-    return (tostring(s)
-        :gsub("&", "&amp;")
-        :gsub("<", "&lt;")
-        :gsub(">", "&gt;")
-        :gsub('"', "&quot;"))
-end
-
-local function readFile(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local data = f:read("*a")
-    f:close()
-    return data
-end
-
-local function writeFile(path, data)
-    local f = assert(io.open(path, "wb"))
-    f:write(data)
-    f:close()
+    socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
+    local ok, code = pcall(function()
+        return socket.skip(1, http.request(request))
+    end)
+    socketutil:reset_timeout()
+    if not ok then
+        return nil, code
+    end
+    local body = table.concat(resp)
+    if body == "" and not code then
+        return nil, "request failed"
+    end
+    return body, code
 end
 
 local function adeptPost(endpoint, body)
-    local resp = {}
-    local _, code = http.request({
+    return requestToString({
         url = endpoint,
-        sink = ltn12.sink.table(resp),
         method = "POST",
         headers = {
             ["Content-Type"] = "application/vnd.adobe.adept+xml",
-            ["User-Agent"] = "book2png",
             ["Content-Length"] = tostring(#body),
         },
         source = ltn12.source.string(body),
     })
-    return table.concat(resp), code
-end
-
-local function httpGet(endpoint)
-    local resp = {}
-    local _, code = http.request({
-        url = endpoint,
-        sink = ltn12.sink.table(resp),
-        headers = { ["User-Agent"] = "book2png" },
-    })
-    return table.concat(resp), code
-end
-
-local function parseXmlDom(xmlString)
-    local handler = domhandler:new()
-    handler.options.commentNode = 0
-    handler.options.piNode = 0
-    handler.options.dtdNode = 0
-    handler.options.declNode = 0
-    local parser = xml2lua.parser(handler)
-    parser:parse(xmlString)
-    return handler.root
-end
-
-local function nsMapFor(node, nsMap)
-    local childNsMap = {}
-    for k, v in pairs(nsMap or {}) do
-        childNsMap[k] = v
-    end
-    for ak, av in pairs(node._attr or {}) do
-        if ak == "xmlns" then
-            childNsMap[""] = av
-        else
-            local prefix = ak:match("^xmlns:(.+)$")
-            if prefix then
-                childNsMap[prefix] = av
-            end
-        end
-    end
-    return childNsMap
-end
-
-local function resolveNodeName(node, nsMap)
-    local ownNs = node._attr and node._attr.xmlns or nil
-    local prefix, localname = node._name:match("^(.-):(.+)$")
-    if prefix then
-        return nsMap[prefix] or "", localname
-    end
-    return ownNs or nsMap[""] or "", node._name
-end
-
-local function firstElement(node, nsMap, localname, namespace)
-    for _, child in ipairs(node._children or {}) do
-        if child._type == "ELEMENT" then
-            local childNsMap = nsMapFor(child, nsMap)
-            local childNs, childName = resolveNodeName(child, nsMap)
-            if childName == localname and (namespace == nil or childNs == namespace) then
-                return child, childNsMap
-            end
-        end
-    end
-    return nil, nil
-end
-
-local function textOf(node)
-    local parts = {}
-    for _, child in ipairs(node._children or {}) do
-        if child._type == "TEXT" then
-            local trimmed = child._text and child._text:match("^%s*(.-)%s*$") or ""
-            if trimmed ~= "" then
-                parts[#parts + 1] = trimmed
-            end
-        end
-    end
-    return table.concat(parts)
-end
-
-local function childText(node, nsMap, localname, namespace)
-    local child = firstElement(node, nsMap, localname, namespace)
-    if not child then return nil end
-    return textOf(child)
-end
-
-local function findDescendant(node, nsMap, localname, namespace)
-    local found, foundNsMap = firstElement(node, nsMap, localname, namespace)
-    if found then return found, foundNsMap end
-
-    for _, child in ipairs(node._children or {}) do
-        if child._type == "ELEMENT" then
-            local childNsMap = nsMapFor(child, nsMap)
-            local desc, descNsMap = findDescendant(child, childNsMap, localname, namespace)
-            if desc then return desc, descNsMap end
-        end
-    end
-    return nil, nil
 end
 
 local function collectNotifyUrls(node, nsMap, urls)
     urls = urls or {}
     for _, child in ipairs(node._children or {}) do
         if child._type == "ELEMENT" then
-            local childNsMap = nsMapFor(child, nsMap)
-            local childNs, childName = resolveNodeName(child, nsMap)
+            local childNsMap = dom.nsMapFor(child, nsMap)
+            local childNs, childName = dom.resolveNodeName(child, nsMap)
             if childNs == ADEPT and childName == "notify" then
-                local notifyUrl = childText(child, childNsMap, "notifyURL", ADEPT)
+                local notifyUrl = dom.childText(child, childNsMap, "notifyURL", ADEPT)
                 if notifyUrl and notifyUrl ~= "" then
                     urls[#urls + 1] = notifyUrl
                 end
@@ -175,47 +73,6 @@ local function collectNotifyUrls(node, nsMap, urls)
     return urls
 end
 
-local function serializeNode(node)
-    local attrs = {}
-    for ak, av in pairs(node._attr or {}) do
-        attrs[#attrs + 1] = { ak, av }
-    end
-    table.sort(attrs, function(a, b) return a[1] < b[1] end)
-
-    local parts = { "<" .. node._name }
-    for _, attr in ipairs(attrs) do
-        parts[#parts + 1] = " " .. attr[1] .. '="' .. xmlEscape(attr[2]) .. '"'
-    end
-
-    if not node._children or #node._children == 0 then
-        parts[#parts + 1] = "/>"
-        return table.concat(parts)
-    end
-
-    parts[#parts + 1] = ">"
-    for _, child in ipairs(node._children) do
-        if child._type == "TEXT" then
-            parts[#parts + 1] = xmlEscape(child._text or "")
-        elseif child._type == "ELEMENT" then
-            parts[#parts + 1] = serializeNode(child)
-        end
-    end
-    parts[#parts + 1] = "</" .. node._name .. ">"
-    return table.concat(parts)
-end
-
-local function firstElementChild(node)
-    if node and node._type == "ELEMENT" then
-        return node
-    end
-    for _, child in ipairs(node._children or {}) do
-        if child._type == "ELEMENT" then
-            return child
-        end
-    end
-    return nil
-end
-
 local function appendHashString(buf, value)
     local len = #value
     buf[#buf + 1] = string.char(math.floor(len / 256))
@@ -224,8 +81,8 @@ local function appendHashString(buf, value)
 end
 
 local function buildAdobeHashBuffer(node, nsMap, buf)
-    local childNsMap = nsMapFor(node, nsMap)
-    local namespace, localname = resolveNodeName(node, childNsMap)
+    local childNsMap = dom.nsMapFor(node, nsMap)
+    local namespace, localname = dom.resolveNodeName(node, childNsMap)
 
     if namespace == ADEPT and (localname == "hmac" or localname == "signature") then
         return
@@ -278,8 +135,8 @@ local function buildAdobeHashBuffer(node, nsMap, buf)
 end
 
 local function adobeDigest(xmlString)
-    local document = parseXmlDom(xmlString)
-    local root = firstElementChild(document)
+    local document = dom.parse(xmlString)
+    local root = dom.firstElementChild(document)
     if not root then
         return nil, "Missing XML root element"
     end
@@ -321,7 +178,10 @@ function fulfillment.operatorAuth(operatorURL, userUUID, userCert, licenseCert, 
     body = body .. '</adept:credentials>'
 
     logger.dbg("[ACSM] Operator auth:", authURL)
-    local resp = adeptPost(authURL, body)
+    local resp, err = adeptPost(authURL, body)
+    if not resp then
+        return nil, "Operator auth failed: " .. tostring(err)
+    end
     local parsed = xml.deserialize(resp or "")
     if parsed and parsed.error then
         return nil, "Operator auth failed: " .. (parsed.error._attr and parsed.error._attr.data or resp)
@@ -335,7 +195,7 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
 
     local body = '<?xml version="1.0"?>\n'
     body = body .. '<adept:licenseServiceRequest xmlns:adept="' .. ADEPT .. '" identity="user">\n'
-    body = body .. '  <adept:operatorURL>' .. xmlEscape(operatorURL) .. '</adept:operatorURL>\n'
+    body = body .. '  <adept:operatorURL>' .. dom.xmlEscape(operatorURL) .. '</adept:operatorURL>\n'
     body = body .. '  <adept:nonce>' .. nonce .. '</adept:nonce>\n'
     body = body .. '  <adept:expiration>' .. expiration .. '</adept:expiration>\n'
     body = body .. '  <adept:user>' .. userUUID .. '</adept:user>\n'
@@ -346,7 +206,10 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
 
     local initURL = activationURL:gsub("/+$", "") .. "/InitLicenseService"
     logger.dbg("[ACSM] InitLicenseService:", initURL)
-    local resp = adeptPost(initURL, body)
+    local resp, err = adeptPost(initURL, body)
+    if not resp then
+        return nil, "InitLicenseService failed: " .. tostring(err)
+    end
     local parsed = xml.deserialize(resp or "")
     if parsed and parsed.error then
         return nil, "InitLicenseService error: " .. (parsed.error._attr and parsed.error._attr.data or resp)
@@ -355,7 +218,7 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
 end
 
 function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signingKey)
-    local acsmContent = readFile(acsmPath)
+    local acsmContent = koutil.readFromFile(acsmPath, "rb")
     if not acsmContent then
         return nil, "Cannot open ACSM file: " .. tostring(acsmPath)
     end
@@ -407,17 +270,17 @@ function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signin
         return nil, "Fulfill error: " .. (parsed.error._attr and parsed.error._attr.data or resp)
     end
 
-    local root = parseXmlDom(resp)
+    local root = dom.parse(resp)
     local rootNsMap = { adept = ADEPT, [""] = ADEPT }
-    local fr, frNsMap = findDescendant(root, rootNsMap, "fulfillmentResult", ADEPT)
+    local fr, frNsMap = dom.findDescendant(root, rootNsMap, "fulfillmentResult", ADEPT)
     if not fr then
         return nil, "No fulfillmentResult in response"
     end
-    local rii, riiNsMap = firstElement(fr, frNsMap, "resourceItemInfo", ADEPT)
+    local rii, riiNsMap = dom.firstElement(fr, frNsMap, "resourceItemInfo", ADEPT)
     if not rii then
         return nil, "No resourceItemInfo in response"
     end
-    local licenseTokenNode, licenseTokenNsMap = firstElement(rii, riiNsMap, "licenseToken", ADEPT)
+    local licenseTokenNode, licenseTokenNsMap = dom.firstElement(rii, riiNsMap, "licenseToken", ADEPT)
     if not licenseTokenNode then
         return nil, "No licenseToken in response"
     end
@@ -425,23 +288,40 @@ function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signin
     return {
         response = resp,
         operatorURL = operatorURL,
-        src = childText(rii, riiNsMap, "src", ADEPT),
-        encryptedKey = childText(licenseTokenNode, licenseTokenNsMap, "encryptedKey", ADEPT),
-        keyType = childText(licenseTokenNode, licenseTokenNsMap, "keyType", ADEPT),
-        licenseURL = childText(licenseTokenNode, licenseTokenNsMap, "licenseURL", ADEPT),
-        licenseTokenXml = serializeNode(licenseTokenNode),
+        src = dom.childText(rii, riiNsMap, "src", ADEPT),
+        encryptedKey = dom.childText(licenseTokenNode, licenseTokenNsMap, "encryptedKey", ADEPT),
+        keyType = dom.childText(licenseTokenNode, licenseTokenNsMap, "keyType", ADEPT),
+        licenseURL = dom.childText(licenseTokenNode, licenseTokenNsMap, "licenseURL", ADEPT),
+        licenseTokenXml = dom.serializeNode(licenseTokenNode),
         notifyURLs = collectNotifyUrls(fr, frNsMap, {}),
     }
 end
 
 function fulfillment.downloadBook(srcUrl, outputPath)
-    local out = assert(io.open(outputPath, "wb"))
-    local _, code = http.request({
-        url = srcUrl,
-        sink = ltn12.sink.file(out),
-        headers = { ["User-Agent"] = "book2png" },
-    })
-    local data = readFile(outputPath)
+    local handle, err = io.open(outputPath, "wb")
+    if not handle then
+        return nil, err
+    end
+
+    local sink, sinkErr = socketutil.file_sink(handle)
+    if not sink then
+        return nil, sinkErr
+    end
+
+    socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
+    local ok, code = pcall(function()
+        return socket.skip(1, http.request({
+            url = srcUrl,
+            sink = sink,
+            headers = { ["User-Agent"] = socketutil.USER_AGENT },
+        }))
+    end)
+    socketutil:reset_timeout()
+    if not ok then
+        return nil, code
+    end
+
+    local data = koutil.readFromFile(outputPath, "rb")
     if not data or data == "" then
         return nil, "Book download failed: " .. tostring(code)
     end
@@ -455,52 +335,6 @@ function fulfillment.decryptBookKey(encryptedKeyB64, licenseKey)
     local decrypted, err = licenseKey.pkey:decrypt(util.base64.decode(encryptedKeyB64), nativecrypto.RSA_PKCS1_PADDING)
     if err then return nil, err end
     return decrypted
-end
-
-function fulfillment.getLicenseServiceCert(operatorURL, licenseURL)
-    local infoUrl = operatorURL:gsub("/+$", "") .. "/LicenseServiceInfo?licenseURL=" .. licenseURL
-    local resp, code = httpGet(infoUrl)
-    if not resp or resp == "" then
-        return nil, "LicenseServiceInfo request failed: " .. tostring(code)
-    end
-    local parsed = xml.deserialize(resp)
-    if parsed.error then
-        return nil, parsed.error._attr and parsed.error._attr.data or resp
-    end
-
-    local info = parsed.licenseServiceInfo or parsed
-    local cert = info.certificate
-    if type(cert) == "table" then cert = cert[1] end
-    local returnedUrl = info.licenseURL
-    if type(returnedUrl) == "table" then returnedUrl = returnedUrl[1] end
-    if not cert then
-        return nil, "No certificate in license service response"
-    end
-    return {
-        certificate = cert,
-        licenseURL = returnedUrl or licenseURL,
-    }
-end
-
-function fulfillment.buildRightsXml(licenseTokenXml, licenseServiceInfo)
-    local rights = '<?xml version="1.0"?>\n'
-    rights = rights .. '<adept:rights xmlns:adept="' .. ADEPT .. '">\n'
-    rights = rights .. licenseTokenXml .. "\n"
-    rights = rights .. '  <adept:licenseServiceInfo>\n'
-    rights = rights .. '    <adept:licenseURL>' .. xmlEscape(licenseServiceInfo.licenseURL) .. '</adept:licenseURL>\n'
-    rights = rights .. '    <adept:certificate>' .. licenseServiceInfo.certificate .. '</adept:certificate>\n'
-    rights = rights .. '  </adept:licenseServiceInfo>\n'
-    rights = rights .. '</adept:rights>'
-    return rights
-end
-
-function fulfillment.injectRightsXml(epubPath, rightsXml, outputPath)
-    local tmpDir = os.tmpname()
-    os.remove(tmpDir)
-    assert(os.execute("mkdir -p " .. shellQuote(tmpDir .. "/META-INF")))
-    writeFile(tmpDir .. "/META-INF/rights.xml", rightsXml)
-    assert(os.execute("cp " .. shellQuote(epubPath) .. " " .. shellQuote(outputPath)))
-    assert(os.execute("cd " .. shellQuote(tmpDir) .. " && zip -q -u " .. shellQuote(outputPath) .. " META-INF/rights.xml"))
 end
 
 function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
@@ -532,7 +366,7 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     local userCert, certErr = fulfillment.extractCertFromPKCS12(creds.pkcs12, creds.deviceKey)
     if not userCert then return nil, "Failed to extract cert: " .. certErr end
 
-    local acsmContent = readFile(acsmPath)
+    local acsmContent = koutil.readFromFile(acsmPath, "rb")
     if not acsmContent then
         return nil, "Cannot open ACSM file: " .. tostring(acsmPath)
     end
@@ -581,7 +415,6 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     if not decryptedInfo then return nil, "Failed to decrypt EPUB: " .. decryptErr end
 
     if result.notifyURLs and #result.notifyURLs > 0 then
-        print("\nStep 8: Sending notifications")
         for _, notifyURL in ipairs(result.notifyURLs) do
             fulfillment.notify(notifyURL, userUUID, deviceUUID, pkcs12Key)
         end

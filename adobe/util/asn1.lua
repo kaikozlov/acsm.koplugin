@@ -17,7 +17,7 @@ function ASN.byte(byte)
 end
 
 function ASN.bytes(bytes)
-    out = ""
+    local out = ""
     for i, byte in ipairs(bytes) do
         out = out .. ASN.byte(byte)
     end
@@ -58,7 +58,7 @@ function ASN.attribute(name, value)
 end
 
 function ASN.element(name, content)
-    out = ""
+    local out = ""
     out = out .. ASN.byte(ASN.BEGIN_ELEMENT)
     out = out .. ASN.tag(name)
     if content._attr ~= nil then

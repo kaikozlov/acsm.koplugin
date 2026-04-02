@@ -16,7 +16,7 @@ function xml.addNamespace(tb, prefix, namespace)
         if k ~= "_attr" then
             -- FIXME: this is a hack to make sure that the namespace is added to the children of the tag
             if type(v) == "table" then
-                newv = {}
+                local newv = {}
                 for j, i in pairs(v) do
                     if j ~= "_attr" then
                         j = prefix .. ":" .. j

@@ -1,191 +1,38 @@
 local epub = {}
 
-local xml2lua = require("xml2lua")
-local domhandler = require("xmlhandler.dom")
-local zlib = require("adobe.util.zlib")
+local Archiver = require("ffi/archiver")
+local lfs = require("libs/libkoreader-lfs")
+local koutil = require("util")
+
+local dom = require("adobe.util.dom")
 local nativecrypto = require("adobe.util.nativecrypto")
-local hasArchiver, Archiver = pcall(require, "ffi/archiver")
-local hasLfs, lfs = pcall(require, "libs/libkoreader-lfs")
+local zlib = require("adobe.util.zlib")
 
 local XMLENC = "http://www.w3.org/2001/04/xmlenc#"
 local AES128_CBC = "http://www.w3.org/2001/04/xmlenc#aes128-cbc"
 local AES128_CBC_UNCOMPRESSED = "http://ns.adobe.com/adept/xmlenc#aes128-cbc-uncompressed"
 
-local function shellQuote(s)
-    return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
-end
-
-local function readFile(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local data = f:read("*a")
-    f:close()
-    return data
-end
-
-local function writeFile(path, data)
-    local f = assert(io.open(path, "wb"))
-    f:write(data)
-    f:close()
-end
-
-local function ensureDir(path)
-    if path == nil or path == "" then
-        return true
-    end
-    if hasLfs then
-        local current = ""
-        if path:sub(1, 1) == "/" then
-            current = "/"
-        end
-        for part in path:gmatch("[^/]+") do
-            if current == "" or current == "/" then
-                current = current .. part
-            else
-                current = current .. "/" .. part
-            end
-            if lfs.attributes(current, "mode") ~= "directory" then
-                local ok, err = lfs.mkdir(current)
-                if not ok and lfs.attributes(current, "mode") ~= "directory" then
-                    return nil, err or ("Could not create directory " .. current)
-                end
-            end
-        end
-        return true
-    end
-    local ok = os.execute("mkdir -p " .. shellQuote(path))
-    if not ok then
-        return nil, "Could not create directory " .. path
-    end
-    return true
-end
-
 local function removeTree(path)
-    if not path or path == "" then
+    if not path or path == "" or lfs.attributes(path, "mode") ~= "directory" then
         return
     end
-    if hasLfs and lfs.attributes(path, "mode") == "directory" then
-        for entry in lfs.dir(path) do
-            if entry ~= "." and entry ~= ".." then
-                local child = path .. "/" .. entry
-                local mode = lfs.attributes(child, "mode")
-                if mode == "directory" then
-                    removeTree(child)
-                else
-                    os.remove(child)
-                end
-            end
-        end
-        lfs.rmdir(path)
-        return
-    end
-    os.execute("rm -rf " .. shellQuote(path))
-end
-
-local function parseXmlDom(xmlString)
-    local handler = domhandler:new()
-    handler.options.commentNode = 0
-    handler.options.piNode = 0
-    handler.options.dtdNode = 0
-    handler.options.declNode = 0
-    local parser = xml2lua.parser(handler)
-    parser:parse(xmlString)
-    return handler.root
-end
-
-local function nsMapFor(node, nsMap)
-    local childNsMap = {}
-    for k, v in pairs(nsMap or {}) do
-        childNsMap[k] = v
-    end
-    for ak, av in pairs(node._attr or {}) do
-        if ak == "xmlns" then
-            childNsMap[""] = av
-        else
-            local prefix = ak:match("^xmlns:(.+)$")
-            if prefix then
-                childNsMap[prefix] = av
+    for entry in lfs.dir(path) do
+        if entry ~= "." and entry ~= ".." then
+            local child = path .. "/" .. entry
+            local mode = lfs.attributes(child, "mode")
+            if mode == "directory" then
+                removeTree(child)
+            else
+                os.remove(child)
             end
         end
     end
-    return childNsMap
-end
-
-local function resolveNodeName(node, nsMap)
-    local ownNs = node._attr and node._attr.xmlns or nil
-    local prefix, localname = node._name:match("^(.-):(.+)$")
-    if prefix then
-        return nsMap[prefix] or "", localname
-    end
-    return ownNs or nsMap[""] or "", node._name
-end
-
-local function firstElement(node, nsMap, localname, namespace)
-    for _, child in ipairs(node._children or {}) do
-        if child._type == "ELEMENT" then
-            local childNsMap = nsMapFor(child, nsMap)
-            local childNs, childName = resolveNodeName(child, nsMap)
-            if childName == localname and (namespace == nil or childNs == namespace) then
-                return child, childNsMap
-            end
-        end
-    end
-    return nil, nil
-end
-
-local function textOf(node)
-    local parts = {}
-    for _, child in ipairs(node._children or {}) do
-        if child._type == "TEXT" then
-            local trimmed = child._text and child._text:match("^%s*(.-)%s*$") or ""
-            if trimmed ~= "" then
-                parts[#parts + 1] = trimmed
-            end
-        end
-    end
-    return table.concat(parts)
-end
-
-local function xmlEscape(s)
-    return (tostring(s)
-        :gsub("&", "&amp;")
-        :gsub("<", "&lt;")
-        :gsub(">", "&gt;")
-        :gsub('"', "&quot;"))
-end
-
-local function serializeNode(node)
-    local attrs = {}
-    for ak, av in pairs(node._attr or {}) do
-        attrs[#attrs + 1] = { ak, av }
-    end
-    table.sort(attrs, function(a, b) return a[1] < b[1] end)
-
-    local parts = { "<" .. node._name }
-    for _, attr in ipairs(attrs) do
-        parts[#parts + 1] = " " .. attr[1] .. '="' .. xmlEscape(attr[2]) .. '"'
-    end
-
-    if not node._children or #node._children == 0 then
-        parts[#parts + 1] = "/>"
-        return table.concat(parts)
-    end
-
-    parts[#parts + 1] = ">"
-    for _, child in ipairs(node._children) do
-        if child._type == "TEXT" then
-            parts[#parts + 1] = xmlEscape(child._text or "")
-        elseif child._type == "ELEMENT" then
-            parts[#parts + 1] = serializeNode(child)
-        end
-    end
-    parts[#parts + 1] = "</" .. node._name .. ">"
-    return table.concat(parts)
+    lfs.rmdir(path)
 end
 
 local function parseEncryptionXml(encryptionXml)
-    local root = parseXmlDom(encryptionXml)
-    local rootNsMap = nsMapFor(root, { [""] = "urn:oasis:names:tc:opendocument:xmlns:container" })
+    local root = dom.parse(encryptionXml)
+    local rootNsMap = dom.nsMapFor(root, { [""] = "urn:oasis:names:tc:opendocument:xmlns:container" })
 
     local encrypted = {}
     local encryptedForceNoDecomp = {}
@@ -196,12 +43,12 @@ local function parseEncryptionXml(encryptionXml)
         if child._type ~= "ELEMENT" then
             keptChildren[#keptChildren + 1] = child
         else
-            local childNsMap = nsMapFor(child, rootNsMap)
-            local childNs, childName = resolveNodeName(child, rootNsMap)
+            local childNsMap = dom.nsMapFor(child, rootNsMap)
+            local childNs, childName = dom.resolveNodeName(child, rootNsMap)
             if childNs == XMLENC and childName == "EncryptedData" then
-                local methodNode = firstElement(child, childNsMap, "EncryptionMethod", XMLENC)
-                local cipherDataNode, cipherDataNsMap = firstElement(child, childNsMap, "CipherData", XMLENC)
-                local cipherRefNode = cipherDataNode and firstElement(cipherDataNode, cipherDataNsMap, "CipherReference", XMLENC)
+                local methodNode = dom.firstElement(child, childNsMap, "EncryptionMethod", XMLENC)
+                local cipherDataNode, cipherDataNsMap = dom.firstElement(child, childNsMap, "CipherData", XMLENC)
+                local cipherRefNode = cipherDataNode and dom.firstElement(cipherDataNode, cipherDataNsMap, "CipherReference", XMLENC)
 
                 local algorithm = methodNode and methodNode._attr and methodNode._attr.Algorithm or nil
                 local uri = cipherRefNode and cipherRefNode._attr and cipherRefNode._attr.URI or nil
@@ -224,7 +71,7 @@ local function parseEncryptionXml(encryptionXml)
 
     local rewrittenXml = nil
     if remainingEncryptedData > 0 then
-        rewrittenXml = '<?xml version="1.0" encoding="UTF-8"?>\n' .. serializeNode(root)
+        rewrittenXml = '<?xml version="1.0" encoding="UTF-8"?>\n' .. dom.serializeNode(root)
     end
 
     return {
@@ -268,56 +115,42 @@ end
 local function makeTempDir()
     local tmpDir = os.tmpname()
     os.remove(tmpDir)
-    local ok, err = ensureDir(tmpDir)
+    local ok, err = koutil.makePath(tmpDir)
     assert(ok, err)
     return tmpDir
 end
 
 local function listFiles(workDir)
     local files = {}
-
-    if hasLfs then
-        local function walk(dir, relBase)
-            for entry in lfs.dir(dir) do
-                if entry ~= "." and entry ~= ".." then
-                    local fullPath = dir .. "/" .. entry
-                    local relPath = relBase ~= "" and (relBase .. "/" .. entry) or entry
-                    local mode = lfs.attributes(fullPath, "mode")
-                    if mode == "directory" then
-                        walk(fullPath, relPath)
-                    elseif mode == "file" then
-                        files[#files + 1] = relPath
-                    end
+    local function walk(dir, relBase)
+        for entry in lfs.dir(dir) do
+            if entry ~= "." and entry ~= ".." then
+                local fullPath = dir .. "/" .. entry
+                local relPath = relBase ~= "" and (relBase .. "/" .. entry) or entry
+                local mode = lfs.attributes(fullPath, "mode")
+                if mode == "directory" then
+                    walk(fullPath, relPath)
+                elseif mode == "file" then
+                    files[#files + 1] = relPath
                 end
             end
         end
-        walk(workDir, "")
-    else
-        local pipe = io.popen(
-            "find " .. shellQuote(workDir) .. " -type f -print | LC_ALL=C sort",
-            "r"
-        )
-        if not pipe then
-            return nil, "Could not enumerate EPUB files"
-        end
-        for fullPath in pipe:lines() do
-            files[#files + 1] = fullPath:sub(#workDir + 2)
-        end
-        pipe:close()
     end
+    walk(workDir, "")
 
     table.sort(files)
     return files
 end
 
-local function repackEpubWithArchiver(workDir, outputPath)
+local function repackEpub(workDir, outputPath)
+    os.remove(outputPath)
     local writer = Archiver.Writer:new{}
     if not writer:open(outputPath, "epub") then
         return nil, writer.err or "Could not open EPUB writer"
     end
 
     local mtime = os.time()
-    local mimetype = readFile(workDir .. "/mimetype")
+    local mimetype = koutil.readFromFile(workDir .. "/mimetype", "rb")
     if not mimetype then
         writer:close()
         return nil, "Missing mimetype"
@@ -339,7 +172,7 @@ local function repackEpubWithArchiver(workDir, outputPath)
     for _, relPath in ipairs(files) do
         if relPath ~= "mimetype" then
             local fullPath = workDir .. "/" .. relPath
-            local content = readFile(fullPath)
+            local content = koutil.readFromFile(fullPath, "rb")
             if not content then
                 writer:close()
                 return nil, "Missing repack input: " .. relPath
@@ -355,28 +188,7 @@ local function repackEpubWithArchiver(workDir, outputPath)
     return true
 end
 
-local function repackEpub(workDir, outputPath)
-    os.remove(outputPath)
-    if hasArchiver then
-        local ok, err = repackEpubWithArchiver(workDir, outputPath)
-        if ok then
-            return true
-        end
-        return nil, err
-    end
-
-    local ok = os.execute(
-        "cd " .. shellQuote(workDir)
-        .. " && zip -X0q " .. shellQuote(outputPath) .. " mimetype"
-        .. " && find . -type f ! -name mimetype -print | LC_ALL=C sort | sed 's#^\\./##' | zip -X9qD " .. shellQuote(outputPath) .. " -@"
-    )
-    if not ok then
-        return nil, "zip failed"
-    end
-    return true
-end
-
-local function extractEpubWithArchiver(inputPath, workDir)
+local function extractEpub(inputPath, workDir)
     local reader = Archiver.Reader:new()
     if not reader:open(inputPath) then
         return nil, reader.err or "Could not open EPUB archive"
@@ -387,7 +199,7 @@ local function extractEpubWithArchiver(inputPath, workDir)
             local fullPath = workDir .. "/" .. entry.path
             local parent = fullPath:match("^(.*)/[^/]+$")
             if parent and parent ~= "" then
-                local ok, err = ensureDir(parent)
+                local ok, err = koutil.makePath(parent)
                 if not ok then
                     reader:close()
                     return nil, err
@@ -398,7 +210,11 @@ local function extractEpubWithArchiver(inputPath, workDir)
                 reader:close()
                 return nil, reader.err or ("Could not extract " .. entry.path)
             end
-            writeFile(fullPath, content)
+            local ok, err = koutil.writeToFile(content, fullPath)
+            if not ok then
+                reader:close()
+                return nil, err
+            end
         end
     end
 
@@ -438,11 +254,11 @@ local function stripAdeptWatermarks(workDir)
     for _, relPath in ipairs(files) do
         if relPath:match("%.x?html$") or relPath:match("%.xml$") then
             local fullPath = workDir .. "/" .. relPath
-            local data = readFile(fullPath)
+            local data = koutil.readFromFile(fullPath, "rb")
             if data then
                 local updated, count = stripAdeptWatermarksFromText(data)
                 if count > 0 then
-                    writeFile(fullPath, updated)
+                    assert(koutil.writeToFile(updated, fullPath))
                     modifiedFiles = modifiedFiles + 1
                 end
             end
@@ -454,18 +270,14 @@ end
 
 function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
     local workDir = makeTempDir()
-    if hasArchiver then
-        local ok, err = extractEpubWithArchiver(inputPath, workDir)
-        if not ok then
-            removeTree(workDir)
-            return nil, err
-        end
-    else
-        assert(os.execute("unzip -qq " .. shellQuote(inputPath) .. " -d " .. shellQuote(workDir)))
+    local ok, err = extractEpub(inputPath, workDir)
+    if not ok then
+        removeTree(workDir)
+        return nil, err
     end
 
     local encryptionPath = workDir .. "/META-INF/encryption.xml"
-    local encryptionXml = readFile(encryptionPath)
+    local encryptionXml = koutil.readFromFile(encryptionPath, "rb")
     if not encryptionXml then
         removeTree(workDir)
         return nil, "Missing META-INF/encryption.xml"
@@ -475,7 +287,7 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
 
     for relPath in pairs(parsed.encrypted) do
         local fullPath = workDir .. "/" .. relPath
-        local encryptedData = readFile(fullPath)
+        local encryptedData = koutil.readFromFile(fullPath, "rb")
         if not encryptedData then
             removeTree(workDir)
             return nil, "Missing encrypted file: " .. relPath
@@ -485,12 +297,12 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
             removeTree(workDir)
             return nil, "Failed to decrypt " .. relPath .. ": " .. err
         end
-        writeFile(fullPath, decryptedData)
+        assert(koutil.writeToFile(decryptedData, fullPath))
     end
 
     for relPath in pairs(parsed.encryptedForceNoDecomp) do
         local fullPath = workDir .. "/" .. relPath
-        local encryptedData = readFile(fullPath)
+        local encryptedData = koutil.readFromFile(fullPath, "rb")
         if not encryptedData then
             removeTree(workDir)
             return nil, "Missing encrypted file: " .. relPath
@@ -500,12 +312,12 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
             removeTree(workDir)
             return nil, "Failed to decrypt " .. relPath .. ": " .. err
         end
-        writeFile(fullPath, decryptedData)
+        assert(koutil.writeToFile(decryptedData, fullPath))
     end
 
     os.remove(workDir .. "/META-INF/rights.xml")
     if parsed.rewrittenXml then
-        writeFile(encryptionPath, parsed.rewrittenXml)
+        assert(koutil.writeToFile(parsed.rewrittenXml, encryptionPath))
     else
         os.remove(encryptionPath)
     end
