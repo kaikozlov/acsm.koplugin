@@ -172,11 +172,11 @@ function ACSM:restoreActivation()
 end
 
 function ACSM:createActivation()
-    Trapper:info(_("Authorizing anonymous Adobe account..."), false, true)
+    Trapper:info(_("Creating Adobe activation..."), false, true)
     local auth_info = adobe.getAuthenticationServiceInfo()
     local creds = adobe.signIn("anonymous", "", "", auth_info.certificate)
 
-    Trapper:info(_("Activating device with Adobe..."), false, true)
+    Trapper:info(_("Registering device..."), false, true)
     local device_uuid, fingerprint = adobe.activate(creds.user, creds.deviceKey, creds.pkcs12)
     local activation = {
         creds = creds,
@@ -222,7 +222,7 @@ end
 function ACSM:fulfillLoan(acsm_path, output_path)
     local activation, reused = self:getActivation(false)
 
-    Trapper:info(_("Fulfilling ACSM and decrypting EPUB..."), false, true)
+    Trapper:info(_("Downloading book..."), false, true)
     local result, err = fulfillment.process(
         acsm_path,
         output_path,
@@ -236,7 +236,7 @@ function ACSM:fulfillLoan(acsm_path, output_path)
         logger.warn("[ACSM] Saved activation failed, retrying with a new activation:", err)
         self:clearActivation()
         activation = self:createActivation()
-        Trapper:info(_("Retrying fulfillment with a fresh activation..."), false, true)
+        Trapper:info(_("Retrying with new activation..."), false, true)
         result, err = fulfillment.process(
             acsm_path,
             output_path,
@@ -272,7 +272,7 @@ function ACSM:openFile(file)
     end
 
     Trapper:wrap(function()
-        Trapper:info(T(_("Preparing %1"), file), false, true)
+        Trapper:info(_("Preparing loan..."), false, true)
         local result, fulfill_err = self:fulfillLoan(file, output_path)
         if not result then
             logger.warn("[ACSM] Processing failed:", fulfill_err)
