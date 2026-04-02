@@ -5,10 +5,8 @@ local plugin_root = source:sub(1, 1) == "@" and source:sub(2):match("^(.*)/main%
 package.path = plugin_root .. "/dependencies/?.lua;" .. package.path
 
 local ConfirmBox = require("ui/widget/confirmbox")
-local DataStorage = require("datastorage")
 local DocumentRegistry = require("document/documentregistry")
 local InfoMessage = require("ui/widget/infomessage")
-local LuaSettings = require("luasettings")
 local NetworkMgr = require("ui/network/manager")
 local Notification = require("ui/widget/notification")
 local Trapper = require("ui/trapper")
@@ -20,16 +18,15 @@ local util = require("util")
 local _ = require("gettext")
 local T = ffiUtil.template
 
-local adobe = require("adobe.adobe")
-local fulfillment = require("adobe.fulfillment")
+local ACSMService = require("acsm_service")
+local libby_state = require("libby_state")
+local LibbyStore = require("libby_store")
+local LibbyUI = require("libby_ui")
 
 local ACSM = WidgetContainer:extend{
     name = "acsm",
     fullname = _("ACSM"),
     is_doc_only = false,
-    settings_file = DataStorage:getSettingsDir() .. "/acsm.lua",
-    settings = nil,
-    reuse_existing = true,
 }
 
 local function trimError(err)
@@ -39,35 +36,26 @@ local function trimError(err)
     return err:gsub("^.-: ", "")
 end
 
-local function isActivationError(err)
-    if type(err) ~= "string" then
-        return false
-    end
-    return err:find("E_ADEPT_USER_AUTH", 1, true)
-        or err:find("E_ADEPT_DISTRIBUTOR_AUTH", 1, true)
-        or err:find("E_ADEPT", 1, true)
-end
-
 function ACSM:init()
+    self.acsm_service = ACSMService:new()
+    self.libby_store = LibbyStore:new()
+    self.libby_ui = LibbyUI:new{
+        plugin = self,
+        store = self.libby_store,
+        state = libby_state,
+        acsm_service = self.acsm_service,
+    }
     self.ui.menu:registerToMainMenu(self)
     self:registerDocumentRegistryAuxProvider()
 end
 
 function ACSM:onFlushSettings()
-    if self.settings then
-        self.settings:saveSetting("activation", self.activation_blob)
-        self.settings:saveSetting("reuse_existing", self.reuse_existing)
-        self.settings:flush()
+    if self.acsm_service then
+        self.acsm_service:flushSettings()
     end
-end
-
-function ACSM:loadSettings()
-    if self.settings then
-        return
+    if self.libby_store then
+        self.libby_store:flush()
     end
-    self.settings = LuaSettings:open(self.settings_file)
-    self.activation_blob = self.settings:readSetting("activation")
-    self.reuse_existing = self.settings:nilOrTrue("reuse_existing")
 end
 
 function ACSM:saveSettings()
@@ -85,11 +73,10 @@ function ACSM:addToMainMenu(menu_items)
 end
 
 function ACSM:getSubMenuItems()
-    self:loadSettings()
-    return {
+    local items = {
         {
             text_func = function()
-                if self.activation_blob then
+                if self.acsm_service:hasActivation() then
                     return _("Adobe activation: ready")
                 end
                 return _("Adobe activation: not set")
@@ -101,24 +88,23 @@ function ACSM:getSubMenuItems()
         {
             text = _("Reuse existing EPUB"),
             checked_func = function()
-                return self.reuse_existing
+                return self.acsm_service:getReuseExisting()
             end,
             callback = function()
-                self.reuse_existing = not self.reuse_existing
-                self:saveSettings()
+                self.acsm_service:setReuseExisting(not self.acsm_service:getReuseExisting())
             end,
         },
         {
             text = _("Forget Adobe activation"),
             enabled_func = function()
-                return self.activation_blob ~= nil
+                return self.acsm_service:hasActivation()
             end,
             callback = function()
                 UIManager:show(ConfirmBox:new{
                     text = _("Forget the saved Adobe activation?"),
                     ok_text = _("Forget"),
                     ok_callback = function()
-                        self:clearActivation()
+                        self.acsm_service:clearActivation()
                         UIManager:show(Notification:new{
                             text = _("Saved Adobe activation cleared."),
                         })
@@ -126,7 +112,14 @@ function ACSM:getSubMenuItems()
                 })
             end,
         },
+        {
+            text = _("Libby"),
+            sub_item_table_func = function()
+                return self.libby_ui:getSubMenuItems()
+            end,
+        },
     }
+    return items
 end
 
 function ACSM:registerDocumentRegistryAuxProvider()
@@ -140,71 +133,11 @@ function ACSM:registerDocumentRegistryAuxProvider()
 end
 
 function ACSM:isFileTypeSupported(file)
-    return util.getFileNameSuffix(file):lower() == "acsm"
+    return self.acsm_service:isFileTypeSupported(file)
 end
 
 function ACSM:deriveOutputPath(acsm_path)
-    local output_path = acsm_path:gsub("%.[Aa][Cc][Ss][Mm]$", ".epub")
-    if output_path == acsm_path then
-        output_path = acsm_path .. ".epub"
-    end
-    return output_path
-end
-
-function ACSM:clearActivation()
-    self:loadSettings()
-    self.activation_blob = nil
-    self:saveSettings()
-end
-
-function ACSM:restoreActivation()
-    self:loadSettings()
-    if not self.activation_blob then
-        return nil, "No saved activation"
-    end
-    local restored, err = adobe.restoreActivation(self.activation_blob)
-    if not restored then
-        logger.warn("[ACSM] Failed to restore activation:", err)
-        self:clearActivation()
-        return nil, err
-    end
-    return restored, nil
-end
-
-function ACSM:createActivation()
-    Trapper:info(_("Creating Adobe activation..."), false, true)
-    local auth_info = adobe.getAuthenticationServiceInfo()
-    local creds = adobe.signIn("anonymous", "", "", auth_info.certificate)
-
-    Trapper:info(_("Registering device..."), false, true)
-    local device_uuid, fingerprint = adobe.activate(creds.user, creds.deviceKey, creds.pkcs12)
-    local activation = {
-        creds = creds,
-        deviceUUID = device_uuid,
-        fingerprint = fingerprint,
-        authCert = auth_info.certificate,
-    }
-
-    self.activation_blob = adobe.serializeActivation(
-        creds,
-        device_uuid,
-        fingerprint,
-        auth_info.certificate,
-        creds.activationURL
-    )
-    self:saveSettings()
-
-    return activation
-end
-
-function ACSM:getActivation(force_new)
-    if not force_new then
-        local restored = self:restoreActivation()
-        if restored then
-            return restored, true
-        end
-    end
-    return self:createActivation(), false
+    return self.acsm_service:deriveOutputPath(acsm_path)
 end
 
 function ACSM:openGeneratedBook(path)
@@ -220,38 +153,9 @@ function ACSM:openGeneratedBook(path)
 end
 
 function ACSM:fulfillLoan(acsm_path, output_path)
-    local activation, reused = self:getActivation(false)
-
-    Trapper:info(_("Downloading book..."), false, true)
-    local result, err = fulfillment.process(
-        acsm_path,
-        output_path,
-        activation.creds,
-        activation.deviceUUID,
-        activation.fingerprint,
-        activation.authCert
-    )
-
-    if not result and reused and isActivationError(err) then
-        logger.warn("[ACSM] Saved activation failed, retrying with a new activation:", err)
-        self:clearActivation()
-        activation = self:createActivation()
-        Trapper:info(_("Retrying with new activation..."), false, true)
-        result, err = fulfillment.process(
-            acsm_path,
-            output_path,
-            activation.creds,
-            activation.deviceUUID,
-            activation.fingerprint,
-            activation.authCert
-        )
-    end
-
-    if not result then
-        return nil, err
-    end
-
-    return result
+    return self.acsm_service:fulfillLoan(acsm_path, output_path, function(text)
+        Trapper:info(text, false, true)
+    end)
 end
 
 function ACSM:openFile(file)
@@ -259,10 +163,9 @@ function ACSM:openFile(file)
         return
     end
 
-    self:loadSettings()
     local output_path = self:deriveOutputPath(file)
 
-    if self.reuse_existing and util.pathExists(output_path) then
+    if self.acsm_service:getReuseExisting() and util.pathExists(output_path) then
         self:openGeneratedBook(output_path)
         return
     end
