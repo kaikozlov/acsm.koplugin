@@ -3,5 +3,6 @@ local _ = require("gettext")
 return {
     name = "acsm",
     fullname = _("ACSM"),
-    description = _([[Fulfill Adobe ACSM loans and open the decrypted EPUB in KOReader.]]),
+    description = _([[Fulfill .acsm loan files from Libby, OverDrive, and other library services.]]),
+    version = "v0.0.1",
 }
