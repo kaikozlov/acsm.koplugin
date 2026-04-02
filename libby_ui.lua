@@ -513,11 +513,7 @@ function LibbyUI:toggleSearchLibrary(library_key)
 end
 
 function LibbyUI:getSearchLibraryMenuItems()
-    local selected, available = self:normalizeSelectedSearchLibraries()
-    local selected_set = {}
-    for _, key in ipairs(selected) do
-        selected_set[key] = true
-    end
+    local available = select(2, self:normalizeSelectedSearchLibraries())
 
     local items = {
         {

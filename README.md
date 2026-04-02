@@ -15,6 +15,10 @@ Run `./build-plugin.sh` to create `dist/acsm.koplugin.zip`.
 
 The build only includes tracked `*.lua` files under `acsm.koplugin/`, which keeps `REFERENCE/` and other repository-only files out of the release archive.
 
+### Checks
+
+Run `./check-lua.sh` to do a LuaJIT syntax pass and a focused `luacheck` pass on the plugin's first-party Lua files.
+
 ### Usage
 
 1. Borrow an ebook from your library and download the `.acsm` file. In Libby: **Shelf → Manage Loan → Read With... → Other Options → EPUB**

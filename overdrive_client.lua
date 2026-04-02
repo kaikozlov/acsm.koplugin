@@ -241,11 +241,11 @@ function OverDriveClient.isSiteAvailabilityBetter(a, b)
         return true
     end
     for _, rule in ipairs({
-        { key = "isAvailable", default = false },
-        { key = "luckyDayAvailableCopies", default = 0 },
-        { key = "estimatedWaitDays", default = 9999, transform = function(v) return -1 * v end },
-        { key = "holdsRatio", default = 9999, transform = function(v) return -1 * v end },
-        { key = "ownedCopies", default = 0 },
+        { key = "isAvailable", default = false, transform = function(v) return v and 1 or 0 end },
+        { key = "luckyDayAvailableCopies", default = 0, transform = function(v) return tonumber(v) or 0 end },
+        { key = "estimatedWaitDays", default = 9999, transform = function(v) return -1 * (tonumber(v) or 9999) end },
+        { key = "holdsRatio", default = 9999, transform = function(v) return -1 * (tonumber(v) or 9999) end },
+        { key = "ownedCopies", default = 0, transform = function(v) return tonumber(v) or 0 end },
     }) do
         local value_a = a[rule.key]
         local value_b = b[rule.key]
