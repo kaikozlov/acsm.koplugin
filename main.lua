@@ -1,43 +1,8 @@
 local source = debug.getinfo(1, "S").source
 local plugin_root = source:sub(1, 1) == "@" and source:sub(2):match("^(.*)/main%.lua$") or nil
-local app_root = plugin_root and plugin_root:match("^(.*)/plugins/[^/]+%.koplugin$")
-if not app_root and plugin_root and plugin_root:match("^plugins/[^/]+%.koplugin$") then
-    app_root = "."
-end
 
--- Dependencies (xml2lua, openssl bindings) live in a subdirectory not covered
--- by the pluginloader's standard plugin_root/?.lua entries.
+-- xml2lua lives in a subdirectory not covered by pluginloader's plugin_root/?.lua
 package.path = plugin_root .. "/dependencies/?.lua;" .. package.path
-
-local function compactCandidates(list)
-    local compacted = {}
-    for _, candidate in ipairs(list) do
-        if candidate and candidate.crypto and candidate.ssl then
-            compacted[#compacted + 1] = candidate
-        end
-    end
-    return compacted
-end
-
-_G.KO_ACSM_OPENSSL_CANDIDATES = compactCandidates({
-    { crypto = "./libs/libcrypto.so.57", ssl = "./libs/libssl.so.60" },
-    { crypto = "./libs/libcrypto.so.3", ssl = "./libs/libssl.so.3" },
-    { crypto = "libs/libcrypto.so.57", ssl = "libs/libssl.so.60" },
-    { crypto = "libs/libcrypto.so.3", ssl = "libs/libssl.so.3" },
-    app_root and {
-        crypto = app_root .. "/libs/libcrypto.so.57",
-        ssl = app_root .. "/libs/libssl.so.60",
-    } or nil,
-    app_root and {
-        crypto = app_root .. "/libs/libcrypto.so.3",
-        ssl = app_root .. "/libs/libssl.so.3",
-    } or nil,
-    { crypto = "libcrypto.so.57", ssl = "libssl.so.60" },
-    { crypto = "libcrypto.so.3", ssl = "libssl.so.3" },
-    { crypto = "libcrypto.so.1.1", ssl = "libssl.so.1.1" },
-    { crypto = "libcrypto.so", ssl = "libssl.so" },
-    { crypto = "crypto", ssl = "ssl" },
-})
 
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")

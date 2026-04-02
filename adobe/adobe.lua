@@ -24,37 +24,6 @@ adobe.VERSIONS = {
 -- default to 2.0.1
 adobe.VERSION = adobe.VERSIONS[2]
 
-local function readFile(path, mode)
-    local f = io.open(path, mode or "rb")
-    if not f then return nil end
-    local data = f:read("*a")
-    f:close()
-    return data
-end
-
-local function hexToBytes(hex)
-    return (hex:gsub("..", function(pair)
-        return string.char(tonumber(pair, 16))
-    end))
-end
-
-local function getMacCredential(name)
-    local cmd = "/usr/bin/security find-generic-password -g -s 'Digital Editions' -a '" .. name .. "' 2>&1 >/dev/null"
-    local handle = io.popen(cmd, "r")
-    if not handle then return nil end
-    local output = handle:read("*a")
-    handle:close()
-
-    local hexform = output:match('password:%s+0x([0-9A-F]+)')
-    if hexform and hexform ~= "" then
-        return hexToBytes(hexform)
-    end
-    local stringform = output:match('password:%s+"(.-)"')
-    if stringform then
-        return stringform
-    end
-    return nil
-end
 
 function adobe.serializeActivation(creds, deviceUUID, fingerprint, authCert, activationURL)
     return {
@@ -102,74 +71,6 @@ function adobe.restoreActivation(serialized)
     }
 end
 
-function adobe.loadMacActivation(activationPath)
-    activationPath = activationPath or (os.getenv("HOME") .. "/Library/Application Support/Adobe/Digital Editions/activation.dat")
-
-    local activationXml = readFile(activationPath, "rb")
-    if not activationXml then
-        return nil, "Activation file not found: " .. activationPath
-    end
-
-    local deviceKeyBytes = getMacCredential("DeviceKey")
-    if not deviceKeyBytes or #deviceKeyBytes ~= 16 then
-        return nil, "Could not read ADE DeviceKey from macOS keychain"
-    end
-
-    local deviceFingerprintBytes = getMacCredential("DeviceFingerprint")
-    if not deviceFingerprintBytes then
-        return nil, "Could not read ADE DeviceFingerprint from macOS keychain"
-    end
-
-    local parsed = xml.deserialize(activationXml)
-    local root = parsed.activationInfo or parsed
-    local credsNode = root.credentials or root["adept:credentials"]
-    local tokenNode = root.activationToken or root["adept:activationToken"]
-    local serviceNode = root.activationServiceInfo or root["adept:activationServiceInfo"]
-    if not credsNode or not tokenNode then
-        return nil, "Invalid ADE activation file"
-    end
-
-    local privateLicenseKey = credsNode.privateLicenseKey or credsNode["adept:privateLicenseKey"]
-    if type(privateLicenseKey) == "table" then privateLicenseKey = privateLicenseKey[1] end
-    local username = credsNode.username or credsNode["adept:username"]
-    if type(username) == "table" then
-        username = username[1]
-    end
-
-    local authCert = credsNode.authenticationCertificate or credsNode["adept:authenticationCertificate"]
-        or (serviceNode and (serviceNode.authenticationCertificate or serviceNode["adept:authenticationCertificate"]))
-    if type(authCert) == "table" then authCert = authCert[1] end
-
-    local pkcs12 = credsNode.pkcs12 or credsNode["adept:pkcs12"]
-    if type(pkcs12) == "table" then pkcs12 = pkcs12[1] end
-    local licenseCert = credsNode.licenseCertificate or credsNode["adept:licenseCertificate"]
-    if type(licenseCert) == "table" then licenseCert = licenseCert[1] end
-    local user = credsNode.user or credsNode["adept:user"]
-    if type(user) == "table" then user = user[1] end
-    local device = tokenNode.device
-    if type(device) == "table" then device = device[1] end
-    local fingerprint = tokenNode.fingerprint
-    if type(fingerprint) == "table" then fingerprint = fingerprint[1] end
-
-    return {
-        creds = {
-            deviceKey = crypto.deviceKey.new(deviceKeyBytes),
-            authKey = nil,
-            licenseKey = crypto.key.new(base64.decode(privateLicenseKey)),
-            licenseCert = licenseCert,
-            user = user,
-            username = username,
-            pkcs12 = pkcs12,
-            activationXml = activationXml,
-            deviceFingerprint = base64.encode(deviceFingerprintBytes),
-        },
-        deviceUUID = device,
-        fingerprint = fingerprint,
-        authCert = authCert,
-        activationPath = activationPath,
-    }
-end
-
 -- get information about the authentication service
 function adobe.getAuthenticationServiceInfo()
     local response = http.request(url.build(util.endpoint(adobe.EDEN_URL, "AuthenticationServiceInfo")))
@@ -185,14 +86,6 @@ function adobe.getAuthenticationServiceInfo()
         }
     end
     return { certificate = info.certificate, methods = methods }
-end
-
--- get the activation service certificate
-function adobe.getActivationServiceCertificate()
-    local response = http.request(url.build(util.endpoint(adobe.EDEN_URL, "ActivationServiceInfo")))
-    local info = xml.deserialize(response).activationServiceInfo   
-
-    return info.certificate
 end
 
 function adobe.signIn(method, username, password, authCert)
@@ -220,20 +113,16 @@ function adobe.signIn(method, username, password, authCert)
         source = ltn12.source.string(signInRequest)
     }
     resp = table.concat(resp)
-    --print(resp)
     resp = xml.deserialize(resp)
 
     if resp.error ~= nil then
         error("Server returned error: " .. resp.error._attr.data)
     elseif resp.credentials == nil then
         error("Server returned unexpected response")
-        print(resp)
     end
-    
-    if deviceKey:decrypt(base64.decode(resp.credentials.encryptedPrivateLicenseKey )) ~= licenseKey:topkcs8() then
-        -- this account has already been signed into
-        print("WARNING: License key from server does not match ours, replacing our key")
-        local lk, err = crypto.key.new(deviceKey:decrypt(base64.decode(resp.credentials.encryptedPrivateLicenseKey )))
+
+    if deviceKey:decrypt(base64.decode(resp.credentials.encryptedPrivateLicenseKey)) ~= licenseKey:topkcs8() then
+        local lk, err = crypto.key.new(deviceKey:decrypt(base64.decode(resp.credentials.encryptedPrivateLicenseKey)))
         if err ~= nil then error(err) end
         licenseKey = lk
     end

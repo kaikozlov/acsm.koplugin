@@ -38,17 +38,14 @@ int inflate(z_stream *strm, int flush);
 int inflateEnd(z_stream *strm);
 ]]
 
-local function loadLibz()
-    for _, name in ipairs({ "z", "libz.dylib", "libz.1.dylib" }) do
-        local ok, lib = pcall(ffi.load, name)
-        if ok then
-            return lib
-        end
-    end
-    error("Could not load zlib")
-end
+pcall(require, "ffi/loadlib")
 
-local libz = loadLibz()
+local libz
+if ffi.loadlib then
+    libz = ffi.loadlib("z", "1")
+else
+    libz = ffi.load("z")
+end
 
 local Z_OK = 0
 local Z_STREAM_END = 1

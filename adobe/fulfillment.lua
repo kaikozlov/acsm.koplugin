@@ -5,6 +5,7 @@ local url = require("socket.url")
 local ltn12 = require("ltn12")
 local xml2lua = require("xml2lua")
 local domhandler = require("xmlhandler.dom")
+local logger = require("logger")
 
 local util = require("adobe.util.util")
 local crypto = require("adobe.util.crypto")
@@ -319,13 +320,12 @@ function fulfillment.operatorAuth(operatorURL, userUUID, userCert, licenseCert, 
     body = body .. '  <adept:authenticationCertificate>' .. authCert .. '</adept:authenticationCertificate>\n'
     body = body .. '</adept:credentials>'
 
-    print("  Operator auth: " .. authURL)
+    logger.dbg("[ACSM] Operator auth:", authURL)
     local resp = adeptPost(authURL, body)
     local parsed = xml.deserialize(resp or "")
     if parsed and parsed.error then
         return nil, "Operator auth failed: " .. (parsed.error._attr and parsed.error._attr.data or resp)
     end
-    print("  Operator auth successful")
     return true
 end
 
@@ -345,13 +345,12 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
     body = body .. '</adept:licenseServiceRequest>'
 
     local initURL = activationURL:gsub("/+$", "") .. "/InitLicenseService"
-    print("  InitLicenseService: " .. initURL)
+    logger.dbg("[ACSM] InitLicenseService:", initURL)
     local resp = adeptPost(initURL, body)
     local parsed = xml.deserialize(resp or "")
     if parsed and parsed.error then
         return nil, "InitLicenseService error: " .. (parsed.error._attr and parsed.error._attr.data or resp)
     end
-    print("  InitLicenseService successful")
     return true
 end
 
@@ -391,21 +390,17 @@ function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signin
     body = body .. '</adept:targetDevice>'
     body = body .. '</adept:fulfill>'
 
-    writeFile("/tmp/fulfill_unsigned.xml", body)
-
     local sig, sigErr = signXmlBody(body, signingKey)
     if not sig then return nil, "Fulfill signing failed: " .. sigErr end
     body = body:gsub("</adept:fulfill>$", "<adept:signature>" .. sig .. "</adept:signature></adept:fulfill>")
 
     local fulfillURL = operatorURL:gsub("/+$", "") .. "/Fulfill"
-    print("  Fulfill: " .. fulfillURL)
-    writeFile("/tmp/fulfill_request.xml", body)
+    logger.dbg("[ACSM] Fulfill:", fulfillURL)
 
     local resp, code = adeptPost(fulfillURL, body)
     if not resp or resp == "" then
         return nil, "Fulfill request failed: " .. tostring(code)
     end
-    writeFile("/tmp/fulfill_response.xml", resp)
 
     local parsed = xml.deserialize(resp)
     if parsed.error then
@@ -523,7 +518,7 @@ function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
     body = body .. '  <adept:signature>' .. sig .. '</adept:signature>\n'
     body = body .. '</adept:notification>'
 
-    print("  Notify: " .. notifyURL)
+    logger.dbg("[ACSM] Notify:", notifyURL)
     adeptPost(notifyURL, body)
     return true
 end
@@ -534,7 +529,6 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     local userUUID = creds.user
     if type(userUUID) == "table" then userUUID = userUUID[1] end
 
-    print("Extracting certificate from PKCS12...")
     local userCert, certErr = fulfillment.extractCertFromPKCS12(creds.pkcs12, creds.deviceKey)
     if not userCert then return nil, "Failed to extract cert: " .. certErr end
 
@@ -559,38 +553,29 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
         end
     end
 
-    print("\nStep 1: Operator Auth")
     local ok, err = fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
     if not ok then return nil, err end
 
-    print("\nStep 2: InitLicenseService")
     ok, err = fulfillment.initLicenseService(activationURL, operatorURL, userUUID, pkcs12Key)
     if not ok then return nil, err end
 
-    print("\nStep 3: Fulfill")
     local result
     result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
     if err and err:find("E_ADEPT_DISTRIBUTOR_AUTH") then
-        print("  Distributor auth failed, retrying operator auth...")
         fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
         result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
     end
     if err then return nil, err end
 
-    print("\nStep 4: Extracting download info")
-    print("  Download URL: " .. tostring(result.src))
-    print("  Key type: " .. tostring(result.keyType))
+    logger.dbg("[ACSM] Download URL:", result.src)
 
-    print("\nStep 5: Downloading book")
     local tmpEpub = os.tmpname() .. ".epub"
     local _, downloadErr = fulfillment.downloadBook(result.src, tmpEpub)
     if downloadErr then return nil, downloadErr end
 
-    print("\nStep 6: Decrypting book key")
     local bookKey, bookKeyErr = fulfillment.decryptBookKey(result.encryptedKey, creds.licenseKey)
     if not bookKey then return nil, "Failed to decrypt book key: " .. bookKeyErr end
 
-    print("\nStep 7: Decrypting EPUB")
     local decryptedInfo, decryptErr = epub.decryptAdobeEpub(tmpEpub, outputPath, bookKey)
     os.remove(tmpEpub)
     if not decryptedInfo then return nil, "Failed to decrypt EPUB: " .. decryptErr end
