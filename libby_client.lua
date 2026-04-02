@@ -64,6 +64,25 @@ local function normalizeHeaders(headers)
     return normalized
 end
 
+local function splitSetCookieHeader(header_value)
+    if type(header_value) ~= "string" or header_value == "" then
+        return {}
+    end
+
+    local items = {}
+    local start_index = 1
+    while start_index <= #header_value do
+        local next_index = header_value:find(",%s*[%w_%-]+=", start_index)
+        if not next_index then
+            items[#items + 1] = util.trim(header_value:sub(start_index))
+            break
+        end
+        items[#items + 1] = util.trim(header_value:sub(start_index, next_index - 1))
+        start_index = next_index + 1
+    end
+    return items
+end
+
 local function trimError(err)
     if type(err) ~= "string" then
         return tostring(err)
@@ -75,6 +94,7 @@ function LibbyClient:new(opts)
     opts = opts or {}
     local instance = setmetatable({}, self)
     instance.identity_token = opts.identity_token
+    instance.cookies = {}
     instance.max_retries = tonumber(opts.max_retries) or 1
     instance.timeout_block = tonumber(opts.timeout_block) or socketutil.FILE_BLOCK_TIMEOUT
     instance.timeout_total = tonumber(opts.timeout_total) or socketutil.FILE_TOTAL_TIMEOUT
@@ -85,6 +105,48 @@ end
 
 function LibbyClient:setIdentityToken(token)
     self.identity_token = token
+end
+
+function LibbyClient:getCookieHeader()
+    local parts = {}
+    for name, value in pairs(self.cookies or {}) do
+        parts[#parts + 1] = name .. "=" .. value
+    end
+    table.sort(parts)
+    if #parts == 0 then
+        return nil
+    end
+    return table.concat(parts, "; ")
+end
+
+function LibbyClient:updateCookies(response_headers)
+    local normalized_headers = normalizeHeaders(response_headers)
+    local raw_cookie_headers = {}
+
+    if type(normalized_headers["set-cookie"]) == "string" then
+        raw_cookie_headers[#raw_cookie_headers + 1] = normalized_headers["set-cookie"]
+    end
+    if type(normalized_headers["set-cookie2"]) == "string" then
+        raw_cookie_headers[#raw_cookie_headers + 1] = normalized_headers["set-cookie2"]
+    end
+
+    for _, raw_cookie_header in ipairs(raw_cookie_headers) do
+        for _, cookie_entry in ipairs(splitSetCookieHeader(raw_cookie_header)) do
+            local pair = cookie_entry:match("^([^;]+)")
+            if pair then
+                local name, value = pair:match("^%s*([^=]+)=(.*)$")
+                if name and value then
+                    name = util.trim(name)
+                    value = util.trim(value)
+                    if value == "" then
+                        self.cookies[name] = nil
+                    else
+                        self.cookies[name] = value
+                    end
+                end
+            end
+        end
+    end
 end
 
 function LibbyClient.isValidSyncCode(code)
@@ -117,6 +179,10 @@ function LibbyClient:_requestRaw(endpoint, opts)
     local headers = opts.headers or self:defaultHeaders()
     if opts.authenticated ~= false and self.identity_token then
         headers["Authorization"] = "Bearer " .. self.identity_token
+    end
+    local cookie_header = self:getCookieHeader()
+    if cookie_header and headers["Cookie"] == nil and headers["cookie"] == nil then
+        headers["Cookie"] = cookie_header
     end
 
     local body
@@ -155,6 +221,8 @@ function LibbyClient:_requestRaw(endpoint, opts)
     if not ok then
         return nil, trimError(code)
     end
+
+    self:updateCookies(response_headers)
 
     return {
         body = table.concat(chunks),
