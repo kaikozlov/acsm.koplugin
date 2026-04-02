@@ -201,6 +201,10 @@ function LibbyClient:_sendRequest(endpoint, opts)
         return nil, message, response.code, decoded
     end
 
+    if opts and opts.decode_response == false then
+        return response.body or "", nil, response.code
+    end
+
     return decoded, nil, response.code
 end
 
@@ -430,6 +434,7 @@ function LibbyClient:fulfillLoanFile(loan_id, card_id, format_id)
             ["Cache-Control"] = "no-cache",
             ["Pragma"] = "no-cache",
         },
+        decode_response = false,
     })
 end
 

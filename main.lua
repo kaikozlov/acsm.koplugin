@@ -65,7 +65,7 @@ end
 function ACSM:addToMainMenu(menu_items)
     menu_items.acsm = {
         text = self.fullname,
-        sorting_hint = "more_tools",
+        sorting_hint = "tools",
         sub_item_table_func = function()
             return self:getSubMenuItems()
         end,
