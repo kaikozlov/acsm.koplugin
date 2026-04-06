@@ -52,6 +52,14 @@ function LibbyStore:setIdentityToken(token)
     self:write("identity_token", token)
 end
 
+function LibbyStore:getChipId()
+    return self:read("chip_id")
+end
+
+function LibbyStore:setChipId(chip_id)
+    self:write("chip_id", chip_id)
+end
+
 function LibbyStore:getSetupCode()
     return self:read("setup_code")
 end
@@ -87,6 +95,7 @@ end
 function LibbyStore:clearAccount()
     self:load()
     self.settings:delSetting("identity_token")
+    self.settings:delSetting("chip_id")
     self.settings:delSetting("setup_code")
     self.settings:delSetting("last_sync_time")
     self.settings:delSetting("sync_state")

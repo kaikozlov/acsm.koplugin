@@ -161,6 +161,7 @@ end
 function LibbyUI:createClient()
     return LibbyClient:new{
         identity_token = self.store:getIdentityToken(),
+        chip_id = self.store:getChipId(),
     }
 end
 
@@ -249,6 +250,21 @@ function LibbyUI:getSubMenuItems()
             end,
             callback = function()
                 self:refreshSyncInteractive()
+            end,
+        },
+        {
+            text = _("Recover Libby from another device"),
+            callback = function()
+                self:recoverFromAnotherDeviceInteractive()
+            end,
+        },
+        {
+            text = _("Generate setup code for another device"),
+            enabled_func = function()
+                return self.store:isConfigured()
+            end,
+            callback = function()
+                self:generateSetupCodeInteractive()
             end,
         },
         {
@@ -1134,6 +1150,7 @@ function LibbyUI:syncAccountState(client, progress_text)
     self:normalizeSelectedSearchLibraries(sync_state)
 
     self.store:setIdentityToken(client.identity_token)
+    self.store:setChipId(client.chip_id)
     self.store:setSyncState(sync_state)
     self.store:setLastSyncTime(os.time())
     self.store:flush()
@@ -1183,6 +1200,15 @@ function LibbyUI:authenticateInput(input)
                 })
                 return
             end
+        end
+
+        local refreshed_chip, refresh_err = client:getChip(true, true)
+        if not refreshed_chip then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Libby authentication refresh failed:\n%1"), trimError(refresh_err)),
+            })
+            return
         end
 
         local sync_state, sync_err = self:syncAccountState(client, _("Syncing Libby account..."))
@@ -1244,6 +1270,182 @@ function LibbyUI:refreshSyncInteractive(on_done)
     end)
 end
 
+function LibbyUI:generateSetupCodeInteractive()
+    if not self.store:isConfigured() then
+        UIManager:show(InfoMessage:new{
+            text = _("Set up Libby first."),
+        })
+        return
+    end
+
+    if NetworkMgr:willRerunWhenOnline(function() self:generateSetupCodeInteractive() end) then
+        return
+    end
+
+    Trapper:wrap(function()
+        Trapper:info(_("Generating Libby setup code..."), false, true)
+        local client = self:createClient()
+        local result, err = client:generateCloneCode()
+        if not result then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Failed to generate Libby setup code:\n%1"), trimError(err)),
+            })
+            return
+        end
+
+        local code = result.code
+        local expiry = tonumber(result.expiry)
+        if type(code) ~= "string" or code == "" or not expiry then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = _("Libby did not return a usable setup code."),
+            })
+            return
+        end
+
+        self.store:setIdentityToken(client.identity_token)
+        self.store:setChipId(client.chip_id)
+        self.store:flush()
+
+        local remaining_seconds = math.max(expiry - os.time(), 0)
+        local status = result.result == "retained" and _("Existing code retained.")
+            or result.result == "regenerated" and _("A fresh code was generated.")
+            or _("Use this code on another device.")
+
+        Trapper:clear()
+        UIManager:show(InfoMessage:new{
+            text = table.concat({
+                _("Libby setup code for another device:"),
+                "",
+                code,
+                "",
+                T(_("Expires in %1 seconds."), tostring(remaining_seconds)),
+                "",
+                status,
+            }, "\n"),
+        })
+    end)
+end
+
+function LibbyUI:completeRecoveryFromAnotherDevice(client, code, expiry)
+    Trapper:wrap(function()
+        Trapper:info(_("Finishing Libby recovery..."), false, true)
+
+        local blessing, bless_err = client:waitForCloneBlessing(code, "pointer", expiry, 3)
+        if not blessing then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Libby recovery did not complete:\n%1"), trimError(bless_err)),
+            })
+            return
+        end
+
+        local cloned, clone_err = client:cloneByBlessing(blessing)
+        if not cloned then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Libby recovery clone failed:\n%1"), trimError(clone_err)),
+            })
+            return
+        end
+        if cloned.result ~= "cloned" then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Libby recovery clone failed:\n%1"), tostring(cloned.result or _("unknown_error"))),
+            })
+            return
+        end
+
+        local refreshed_chip, refresh_err = client:getChip(true, true)
+        if not refreshed_chip then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Libby authentication refresh failed:\n%1"), trimError(refresh_err)),
+            })
+            return
+        end
+
+        local sync_state, sync_err = self:syncAccountState(client, _("Syncing Libby account..."))
+        if not sync_state then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Libby sync failed:\n%1"), trimError(sync_err)),
+            })
+            return
+        end
+        if sync_state.result ~= "synchronized" or type(sync_state.cards) ~= "table" or #sync_state.cards == 0 then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = _("Libby did not return a usable account state."),
+            })
+            return
+        end
+
+        self.store:setSetupCode(nil)
+        self.store:flush()
+
+        Trapper:clear()
+        UIManager:show(Notification:new{
+            text = _("Libby account recovered."),
+        })
+    end)
+end
+
+function LibbyUI:recoverFromAnotherDeviceInteractive()
+    if NetworkMgr:willRerunWhenOnline(function() self:recoverFromAnotherDeviceInteractive() end) then
+        return
+    end
+
+    Trapper:wrap(function()
+        Trapper:info(_("Preparing Libby recovery code..."), false, true)
+
+        local client = LibbyClient:new()
+        local chip, chip_err = client:getChip(true, false)
+        if not chip then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Failed to initialize Libby recovery:\n%1"), trimError(chip_err)),
+            })
+            return
+        end
+
+        local result, err = client:generateCloneCode("pointer")
+        if not result then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Failed to generate Libby recovery code:\n%1"), trimError(err)),
+            })
+            return
+        end
+
+        local code = result.code
+        local expiry = tonumber(result.expiry)
+        if type(code) ~= "string" or code == "" or not expiry then
+            Trapper:reset()
+            UIManager:show(InfoMessage:new{
+                text = _("Libby did not return a usable recovery code."),
+            })
+            return
+        end
+
+        Trapper:clear()
+        UIManager:show(ConfirmBox:new{
+            text = table.concat({
+                _("On your other Libby device, open Copy To Another Device and enter this code:"),
+                "",
+                code,
+                "",
+                T(_("After you enter the code on the other device, tap %1 here."), _("Continue")),
+            }, "\n"),
+            ok_text = _("Continue"),
+            ok_callback = function()
+                self:completeRecoveryFromAnotherDevice(client, code, expiry)
+            end,
+        })
+    end)
+end
+
 function LibbyUI:downloadOrOpenLoan(loan)
     local paths, path_err = self:getLoanPaths(loan)
     if not paths then
@@ -1278,7 +1480,10 @@ function LibbyUI:downloadOrOpenLoan(loan)
 
             Trapper:info(_("Downloading loan file..."), false, true)
             local client = self:createClient()
-            local contents, err = client:fulfillLoanFile(loan.id, loan.cardId, format_id)
+            local contents, err = client:fulfillLoanFile(loan, format_id)
+            self.store:setIdentityToken(client.identity_token)
+            self.store:setChipId(client.chip_id)
+            self.store:flush()
             if not contents then
                 Trapper:reset()
                 UIManager:show(InfoMessage:new{
@@ -1286,9 +1491,6 @@ function LibbyUI:downloadOrOpenLoan(loan)
                 })
                 return
             end
-
-            self.store:setIdentityToken(client.identity_token)
-            self.store:flush()
 
             local saved_path, save_err = self.acsm_service:saveLoanFile(acsm_path, contents)
             if not saved_path then

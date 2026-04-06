@@ -53,12 +53,12 @@ local Z_NO_FLUSH = 0
 local Z_BUF_ERROR = -5
 local CHUNK_SIZE = 32768
 
-function zlib.inflateRaw(data)
+local function inflateWithWindowBits(data, window_bits)
     local stream = ffi.new("z_stream[1]")
     stream[0].next_in = ffi.cast("Bytef *", data)
     stream[0].avail_in = #data
 
-    local rc = libz.inflateInit2_(stream, -15, libz.zlibVersion(), ffi.sizeof(stream[0]))
+    local rc = libz.inflateInit2_(stream, window_bits, libz.zlibVersion(), ffi.sizeof(stream[0]))
     if rc ~= Z_OK then
         return nil, "inflateInit2 failed: " .. tostring(rc)
     end
@@ -91,6 +91,14 @@ function zlib.inflateRaw(data)
 
     libz.inflateEnd(stream)
     return table.concat(chunks)
+end
+
+function zlib.inflateRaw(data)
+    return inflateWithWindowBits(data, -15)
+end
+
+function zlib.inflateGzip(data)
+    return inflateWithWindowBits(data, 15 + 32)
 end
 
 return zlib
