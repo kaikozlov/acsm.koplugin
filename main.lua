@@ -142,13 +142,18 @@ function ACSM:getSubMenuItems()
 end
 
 function ACSM:registerDocumentRegistryAuxProvider()
-    DocumentRegistry:addAuxProvider({
+    local provider = {
         provider_name = self.fullname,
         provider = self.name,
         order = 35,
         disable_file = true,
         disable_type = false,
-    })
+    }
+    -- Register as aux provider for the OpenWith dialog
+    DocumentRegistry:addAuxProvider(provider)
+    -- Also register the .acsm extension so files are visible without "show unsupported",
+    -- and are automatically opened by our plugin without manual provider selection.
+    DocumentRegistry:addProvider("acsm", "application/vnd.adobe.adept+xml", provider, 100)
 end
 
 function ACSM:isFileTypeSupported(file)
