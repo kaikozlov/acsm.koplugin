@@ -2,6 +2,8 @@ local zlib = {}
 
 local ffi = require("ffi")
 
+local isAndroid = pcall(require, "android")
+
 ffi.cdef [[
 typedef void *voidpf;
 typedef unsigned char Bytef;
@@ -41,7 +43,29 @@ int inflateEnd(z_stream *strm);
 pcall(require, "ffi/loadlib")
 
 local libz
-if ffi.loadlib then
+if isAndroid then
+    -- Same as nativecrypto.lua: monolibtic doesn't export zlib symbols.
+    -- Copy system libz to app data dir and load from there.
+    local android = require("android")
+    local sys_libz = "/system/lib64/libz.so"
+    local local_libz = android.dir .. "/libz.so"
+    local cached = io.open(local_libz, "rb")
+    if cached then
+        cached:close()
+    else
+        local src = io.open(sys_libz, "rb")
+        if src then
+            local data = src:read("*a")
+            src:close()
+            local dst = io.open(local_libz, "wb")
+            if dst then
+                dst:write(data)
+                dst:close()
+            end
+        end
+    end
+    libz = ffi.load(local_libz)
+elseif ffi.loadlib then
     libz = ffi.loadlib("z", "1")
 else
     libz = ffi.load("z")

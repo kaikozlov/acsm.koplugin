@@ -1,9 +1,41 @@
 local ffi = require("ffi")
 
+local isAndroid = pcall(require, "android")
+
 pcall(require, "ffi/loadlib")
 
 local libcrypto
-if ffi.loadlib then
+if isAndroid then
+    -- On Android, KOReader's monolibtic only exports a tiny subset of crypto symbols.
+    -- Use the system BoringSSL instead, which has everything we need.
+    --
+    -- The app's linker namespace blocks dlopen of /system/lib64/libcrypto.so directly,
+    -- so we copy it to the app's data directory (which IS in the permitted namespace)
+    -- and load from there.
+    local android = require("android")
+    local sys_crypto = "/system/lib64/libcrypto.so"
+    local local_crypto = android.dir .. "/libcrypto.so"
+
+    -- Check if we already have a copy
+    local cached = io.open(local_crypto, "rb")
+    if cached then
+        cached:close()
+    else
+        -- Copy system BoringSSL to app data dir
+        local src = io.open(sys_crypto, "rb")
+        if src then
+            local data = src:read("*a")
+            src:close()
+            local dst = io.open(local_crypto, "wb")
+            if dst then
+                dst:write(data)
+                dst:close()
+            end
+        end
+    end
+    libcrypto = ffi.load(local_crypto)
+elseif ffi.loadlib then
+    -- On Kindle/etc, KOReader ships a standalone LibreSSL with full symbols.
     libcrypto = ffi.loadlib("crypto", "57", "crypto")
 else
     libcrypto = ffi.load("crypto")

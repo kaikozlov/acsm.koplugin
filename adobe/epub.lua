@@ -1,7 +1,9 @@
 local epub = {}
 
 local Archiver = require("ffi/archiver")
+local DataStorage = require("datastorage")
 local lfs = require("libs/libkoreader-lfs")
+local logger = require("logger")
 local koutil = require("util")
 
 local dom = require("adobe.util.dom")
@@ -113,8 +115,13 @@ local function decryptAdeptEntry(data, bookKey, noDecomp)
 end
 
 local function makeTempDir()
-    local tmpDir = os.tmpname()
-    os.remove(tmpDir)
+    local cacheDir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
+    koutil.makePath(cacheDir)
+    local tmpDir = cacheDir .. "/epub_work"
+    -- Clean up any previous run
+    if lfs.attributes(tmpDir, "mode") == "directory" then
+        removeTree(tmpDir)
+    end
     local ok, err = koutil.makePath(tmpDir)
     assert(ok, err)
     return tmpDir
@@ -269,12 +276,16 @@ local function stripAdeptWatermarks(workDir)
 end
 
 function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
+    logger.info("[ACSM] decryptAdobeEpub: input=", inputPath, "output=", outputPath)
     local workDir = makeTempDir()
+    logger.info("[ACSM] decryptAdobeEpub: workDir=", workDir)
     local ok, err = extractEpub(inputPath, workDir)
     if not ok then
+        logger.warn("[ACSM] decryptAdobeEpub: failed to extract epub:", err)
         removeTree(workDir)
         return nil, err
     end
+    logger.info("[ACSM] decryptAdobeEpub: extracted, reading encryption.xml...")
 
     local encryptionPath = workDir .. "/META-INF/encryption.xml"
     local encryptionXml = koutil.readFromFile(encryptionPath, "rb")
@@ -284,7 +295,9 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
     end
 
     local parsed = parseEncryptionXml(encryptionXml)
+    logger.info("[ACSM] decryptAdobeEpub: parsed encryption, decrypting entries...")
 
+    local decryptCount = 0
     for relPath in pairs(parsed.encrypted) do
         local fullPath = workDir .. "/" .. relPath
         local encryptedData = koutil.readFromFile(fullPath, "rb")
@@ -298,8 +311,11 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
             return nil, "Failed to decrypt " .. relPath .. ": " .. err
         end
         assert(koutil.writeToFile(decryptedData, fullPath))
+        decryptCount = decryptCount + 1
     end
+    logger.info("[ACSM] decryptAdobeEpub: decrypted", decryptCount, "entries with decompression")
 
+    local forceNoDecompCount = 0
     for relPath in pairs(parsed.encryptedForceNoDecomp) do
         local fullPath = workDir .. "/" .. relPath
         local encryptedData = koutil.readFromFile(fullPath, "rb")
@@ -313,7 +329,9 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
             return nil, "Failed to decrypt " .. relPath .. ": " .. err
         end
         assert(koutil.writeToFile(decryptedData, fullPath))
+        forceNoDecompCount = forceNoDecompCount + 1
     end
+    logger.info("[ACSM] decryptAdobeEpub: decrypted", forceNoDecompCount, "entries without decompression")
 
     os.remove(workDir .. "/META-INF/rights.xml")
     if parsed.rewrittenXml then
@@ -330,9 +348,11 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
 
     local ok, repackErr = repackEpub(workDir, outputPath)
     if not ok then
+        logger.warn("[ACSM] decryptAdobeEpub: failed to repack:", repackErr)
         removeTree(workDir)
         return nil, repackErr
     end
+    logger.info("[ACSM] decryptAdobeEpub: repacked successfully to", outputPath)
 
     removeTree(workDir)
 

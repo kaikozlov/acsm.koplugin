@@ -3,6 +3,7 @@ local adobe = {}
 -- load required modules
 local http = require("socket.http")
 local ltn12 = require("ltn12")
+local logger = require("logger")
 local socket = require("socket")
 local socketutil = require("socketutil")
 local url = require("socket.url")
@@ -33,18 +34,22 @@ local function requestToString(request)
     request.headers = request.headers or {}
     request.headers["User-Agent"] = request.headers["User-Agent"] or socketutil.USER_AGENT
 
+    logger.info("[ACSM] HTTP request:", request.method or "GET", request.url)
     socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
     local ok, code = pcall(function()
         return socket.skip(1, http.request(request))
     end)
     socketutil:reset_timeout()
     if not ok then
+        logger.info("[ACSM] HTTP request failed with exception:", code)
         error(code)
     end
     local body = table.concat(resp)
     if body == "" and not code then
+        logger.info("[ACSM] HTTP request returned empty body with no status code")
         error("request failed")
     end
+    logger.info("[ACSM] HTTP response: status=", code, "body_len=", #body)
     return body, code
 end
 
@@ -115,8 +120,11 @@ end
 
 -- get information about the authentication service
 function adobe.getAuthenticationServiceInfo()
+    logger.info("[ACSM] getAuthenticationServiceInfo: requesting...")
     local response = adeptGet(url.build(util.endpoint(adobe.EDEN_URL, "AuthenticationServiceInfo")))
+    logger.info("[ACSM] getAuthenticationServiceInfo: parsing response...")
     local info = xml.deserialize(response).authenticationServiceInfo
+    logger.info("[ACSM] getAuthenticationServiceInfo: got", #info.signInMethods.signInMethod, "sign-in methods")
 
     -- parse the methods into a nicer table
     local raw = info.signInMethods.signInMethod
@@ -131,12 +139,16 @@ function adobe.getAuthenticationServiceInfo()
 end
 
 function adobe.signIn(method, username, password, authCert)
+    logger.info("[ACSM] signIn: method=", method)
     local deviceKey = crypto.deviceKey.new()
+    logger.info("[ACSM] signIn: generated device key")
 
     local authKey = crypto.key.new()
     local licenseKey = crypto.key.new()
+    logger.info("[ACSM] signIn: generated auth and license keys")
 
     local login = crypto.encryptLogin(username, password, deviceKey, authCert)
+    logger.info("[ACSM] signIn: encrypted login, sending sign-in request...")
     local signInRequest = xml.adobe({
         _attr = { method = method},
         signInData = login,
@@ -146,8 +158,10 @@ function adobe.signIn(method, username, password, authCert)
         encryptedPrivateLicenseKey = base64.encode(deviceKey:encrypt(licenseKey:topkcs8()))
     }, "signIn")
 
+    logger.info("[ACSM] signIn: parsing response...")
     local resp = adeptPost(url.build(util.endpoint(adobe.EDEN_URL, "SignInDirect")), signInRequest)
     resp = xml.deserialize(resp)
+    logger.info("[ACSM] signIn: got response")
 
     if resp.error ~= nil then
         error("Server returned error: " .. resp.error._attr.data)
@@ -188,9 +202,12 @@ function adobe.targetDevice(fingerprint, activationToken)
 end
 
 function adobe.activate(user, deviceKey, pkcs12)
+    logger.info("[ACSM] activate: generating device serial and fingerprint...")
     local serial = crypto.serial()
     local fingerprint = crypto.fingerprint(serial, deviceKey)
+    logger.info("[ACSM] activate: decoding pkcs12...")
     local pkcs12Key = crypto.decodepkcs12(pkcs12, deviceKey)
+    logger.info("[ACSM] activate: building activation request, fingerprint=", fingerprint)
 
     local activationRequest = xml.adobeSigned("activate", pkcs12Key, {
         _attr = { requestType = "initial"},
@@ -205,12 +222,15 @@ function adobe.activate(user, deviceKey, pkcs12)
         user = user
     })
 
+    logger.info("[ACSM] activate: sending activation request...")
     local resp = adeptPost(url.build(util.endpoint(adobe.EDEN_URL, "Activate")), activationRequest)
+    logger.info("[ACSM] activate: parsing activation response...")
     resp = xml.deserialize(resp)
     if resp.error ~= nil then
+        logger.warn("[ACSM] activate: server returned error:", resp.error._attr.data)
         error("Server returned error: " .. resp.error._attr.data)
     end
-    
+    logger.info("[ACSM] activate: success, device=", resp.activationToken.device)
     return resp.activationToken.device, fingerprint
 end
 return adobe

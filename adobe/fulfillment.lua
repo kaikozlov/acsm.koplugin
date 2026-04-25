@@ -1,5 +1,6 @@
 local fulfillment = {}
 
+local DataStorage = require("datastorage")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
 local logger = require("logger")
@@ -177,7 +178,7 @@ function fulfillment.operatorAuth(operatorURL, userUUID, userCert, licenseCert, 
     body = body .. '  <adept:authenticationCertificate>' .. authCert .. '</adept:authenticationCertificate>\n'
     body = body .. '</adept:credentials>'
 
-    logger.dbg("[ACSM] Operator auth:", authURL)
+    logger.info("[ACSM] Operator auth:", authURL)
     local resp, err = adeptPost(authURL, body)
     if not resp then
         return nil, "Operator auth failed: " .. tostring(err)
@@ -205,7 +206,7 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
     body = body .. '</adept:licenseServiceRequest>'
 
     local initURL = activationURL:gsub("/+$", "") .. "/InitLicenseService"
-    logger.dbg("[ACSM] InitLicenseService:", initURL)
+    logger.info("[ACSM] InitLicenseService:", initURL)
     local resp, err = adeptPost(initURL, body)
     if not resp then
         return nil, "InitLicenseService failed: " .. tostring(err)
@@ -258,7 +259,7 @@ function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signin
     body = body:gsub("</adept:fulfill>$", "<adept:signature>" .. sig .. "</adept:signature></adept:fulfill>")
 
     local fulfillURL = operatorURL:gsub("/+$", "") .. "/Fulfill"
-    logger.dbg("[ACSM] Fulfill:", fulfillURL)
+    logger.info("[ACSM] Fulfill:", fulfillURL)
 
     local resp, code = adeptPost(fulfillURL, body)
     if not resp or resp == "" then
@@ -352,20 +353,24 @@ function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
     body = body .. '  <adept:signature>' .. sig .. '</adept:signature>\n'
     body = body .. '</adept:notification>'
 
-    logger.dbg("[ACSM] Notify:", notifyURL)
+    logger.info("[ACSM] Notify:", notifyURL)
     adeptPost(notifyURL, body)
     return true
 end
 
 function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprint, authCert)
     outputPath = outputPath or acsmPath:gsub("%.acsm$", ".epub")
+    logger.info("[ACSM] fulfillment.process: acsmPath=", acsmPath, "outputPath=", outputPath)
 
     local userUUID = creds.user
     if type(userUUID) == "table" then userUUID = userUUID[1] end
 
+    logger.info("[ACSM] fulfillment.process: extracting user cert from PKCS12...")
     local userCert, certErr = fulfillment.extractCertFromPKCS12(creds.pkcs12, creds.deviceKey)
     if not userCert then return nil, "Failed to extract cert: " .. certErr end
+    logger.info("[ACSM] fulfillment.process: got user cert")
 
+    logger.info("[ACSM] fulfillment.process: reading ACSM file...")
     local acsmContent = koutil.readFromFile(acsmPath, "rb")
     if not acsmContent then
         return nil, "Cannot open ACSM file: " .. tostring(acsmPath)
@@ -374,7 +379,9 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     local operatorURL = acsmParsed.fulfillmentToken.operatorURL
     if type(operatorURL) == "table" then operatorURL = operatorURL[1] end
     if not operatorURL then return nil, "No operatorURL in ACSM" end
+    logger.info("[ACSM] fulfillment.process: operatorURL=", operatorURL)
 
+    logger.info("[ACSM] fulfillment.process: decoding pkcs12...")
     local pkcs12Key = crypto.decodepkcs12(creds.pkcs12, creds.deviceKey)
     local activationURL = creds.activationURL or "https://adeactivate.adobe.com/adept"
     if not creds.activationURL and creds.activationXml then
@@ -387,32 +394,42 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
         end
     end
 
+    logger.info("[ACSM] fulfillment.process: doing operator auth...")
     local ok, err = fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
     if not ok then return nil, err end
+    logger.info("[ACSM] fulfillment.process: operator auth done, init license service...")
 
     ok, err = fulfillment.initLicenseService(activationURL, operatorURL, userUUID, pkcs12Key)
     if not ok then return nil, err end
+    logger.info("[ACSM] fulfillment.process: license service initialized, fulfilling...")
 
     local result
     result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
     if err and err:find("E_ADEPT_DISTRIBUTOR_AUTH") then
+        logger.info("[ACSM] fulfillment.process: got DISTRIBUTOR_AUTH error, retrying operator auth...")
         fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
         result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
     end
     if err then return nil, err end
+    logger.info("[ACSM] fulfillment.process: fulfillment OK, download URL=", result.src)
 
-    logger.dbg("[ACSM] Download URL:", result.src)
-
-    local tmpEpub = os.tmpname() .. ".epub"
+    local cacheDir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
+    logger.info("[ACSM] fulfillment.process: ensuring cache dir=", cacheDir)
+    koutil.makePath(cacheDir)
+    local tmpEpub = cacheDir .. "/fulfillment.epub"
+    logger.info("[ACSM] fulfillment.process: downloading book to", tmpEpub)
     local _, downloadErr = fulfillment.downloadBook(result.src, tmpEpub)
     if downloadErr then return nil, downloadErr end
+    logger.info("[ACSM] fulfillment.process: download complete, decrypting book key...")
 
     local bookKey, bookKeyErr = fulfillment.decryptBookKey(result.encryptedKey, creds.licenseKey)
     if not bookKey then return nil, "Failed to decrypt book key: " .. bookKeyErr end
+    logger.info("[ACSM] fulfillment.process: book key decrypted, decrypting EPUB...")
 
     local decryptedInfo, decryptErr = epub.decryptAdobeEpub(tmpEpub, outputPath, bookKey)
     os.remove(tmpEpub)
     if not decryptedInfo then return nil, "Failed to decrypt EPUB: " .. decryptErr end
+    logger.info("[ACSM] fulfillment.process: EPUB decrypted to", outputPath)
 
     if result.notifyURLs and #result.notifyURLs > 0 then
         for _, notifyURL in ipairs(result.notifyURLs) do

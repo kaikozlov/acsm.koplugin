@@ -57,6 +57,7 @@ function ACSM:onFlushSettings()
     if self.settings then
         self.settings:saveSetting("activation", self.activation_blob)
         self.settings:saveSetting("reuse_existing", self.reuse_existing)
+        self.settings:saveSetting("open_after_download", self.open_after_download)
         self.settings:flush()
     end
 end
@@ -68,6 +69,7 @@ function ACSM:loadSettings()
     self.settings = LuaSettings:open(self.settings_file)
     self.activation_blob = self.settings:readSetting("activation")
     self.reuse_existing = self.settings:nilOrTrue("reuse_existing")
+    self.open_after_download = self.settings:nilOrTrue("open_after_download")
 end
 
 function ACSM:saveSettings()
@@ -96,6 +98,16 @@ function ACSM:getSubMenuItems()
             end,
             enabled_func = function()
                 return false
+            end,
+        },
+        {
+            text = _("Open book after download"),
+            checked_func = function()
+                return self.open_after_download
+            end,
+            callback = function()
+                self.open_after_download = not self.open_after_download
+                self:saveSettings()
             end,
         },
         {
@@ -160,24 +172,32 @@ end
 function ACSM:restoreActivation()
     self:loadSettings()
     if not self.activation_blob then
+        logger.info("[ACSM] restoreActivation: no saved activation blob")
         return nil, "No saved activation"
     end
+    logger.info("[ACSM] restoreActivation: restoring from saved blob...")
     local restored, err = adobe.restoreActivation(self.activation_blob)
     if not restored then
-        logger.warn("[ACSM] Failed to restore activation:", err)
+        logger.warn("[ACSM] restoreActivation: failed:", err)
         self:clearActivation()
         return nil, err
     end
+    logger.info("[ACSM] restoreActivation: success")
     return restored, nil
 end
 
 function ACSM:createActivation()
     Trapper:info(_("Creating Adobe activation..."), false, true)
+    logger.info("[ACSM] createActivation: fetching authentication service info...")
     local auth_info = adobe.getAuthenticationServiceInfo()
+    logger.info("[ACSM] createActivation: got auth service info, signing in anonymously...")
     local creds = adobe.signIn("anonymous", "", "", auth_info.certificate)
+    logger.info("[ACSM] createActivation: sign-in successful, user=", creds.user)
 
     Trapper:info(_("Registering device..."), false, true)
+    logger.info("[ACSM] createActivation: sending device activation request...")
     local device_uuid, fingerprint = adobe.activate(creds.user, creds.deviceKey, creds.pkcs12)
+    logger.info("[ACSM] createActivation: device activated, uuid=", device_uuid)
     local activation = {
         creds = creds,
         deviceUUID = device_uuid,
@@ -185,6 +205,7 @@ function ACSM:createActivation()
         authCert = auth_info.certificate,
     }
 
+    logger.info("[ACSM] createActivation: serializing and saving activation...")
     self.activation_blob = adobe.serializeActivation(
         creds,
         device_uuid,
@@ -193,17 +214,21 @@ function ACSM:createActivation()
         creds.activationURL
     )
     self:saveSettings()
+    logger.info("[ACSM] createActivation: complete")
 
     return activation
 end
 
 function ACSM:getActivation(force_new)
+    logger.info("[ACSM] getActivation: force_new=", force_new)
     if not force_new then
         local restored = self:restoreActivation()
         if restored then
+            logger.info("[ACSM] getActivation: using restored activation")
             return restored, true
         end
     end
+    logger.info("[ACSM] getActivation: creating new activation")
     return self:createActivation(), false
 end
 
@@ -220,9 +245,11 @@ function ACSM:openGeneratedBook(path)
 end
 
 function ACSM:fulfillLoan(acsm_path, output_path)
+    logger.info("[ACSM] fulfillLoan: acsm_path=", acsm_path, "output_path=", output_path)
     local activation, reused = self:getActivation(false)
 
     Trapper:info(_("Downloading book..."), false, true)
+    logger.info("[ACSM] fulfillLoan: starting fulfillment.process...")
     local result, err = fulfillment.process(
         acsm_path,
         output_path,
@@ -288,9 +315,15 @@ function ACSM:openFile(file)
         end
 
         Trapper:clear()
-        UIManager:nextTick(function()
-            self:openGeneratedBook(result.outputPath)
-        end)
+        if self.open_after_download then
+            UIManager:nextTick(function()
+                self:openGeneratedBook(result.outputPath)
+            end)
+        else
+            UIManager:show(InfoMessage:new{
+                text = T(_("Book downloaded:\n%1"), result.outputPath),
+            })
+        end
     end)
 end
 
