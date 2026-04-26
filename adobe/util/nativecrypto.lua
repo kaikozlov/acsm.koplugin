@@ -299,7 +299,10 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
 
     local decryptor = {}
 
-    function decryptor:update_raw(chunk, sink)
+    --- Decrypt a chunk of data.
+    -- If sink is provided, calls sink(ptr, len) with the output buffer.
+    -- If no sink, returns (ptr, len) directly.
+    function decryptor:update(chunk, sink)
         if finalized then return nil, "decryptor already finalized" end
         local needed = #chunk + 32
         if needed > out_cap then
@@ -315,21 +318,12 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
         return out, outl[0]
     end
 
-    function decryptor:update(chunk)
-        local ptr, len = decryptor:update_raw(chunk)
-        if not ptr then
-            return nil, len
-        end
-        if len == 0 then
-            return ""
-        end
-        return ffi.string(ptr, len)
-    end
-
-    function decryptor:finalize_raw(sink)
+    --- Finalize decryption and return remaining bytes.
+    -- If sink is provided, calls sink(ptr, len) with any final output.
+    -- If no sink, returns (ptr, len) directly.
+    function decryptor:finalize(sink)
         if finalized then return nil, "decryptor already finalized" end
         finalized = true
-        -- Final block is at most 32 bytes; reuse buffer if large enough
         if out_cap < 32 then
             out = ffi.new("unsigned char[32]")
             out_cap = 32
@@ -341,17 +335,6 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
             return sink(out, outl[0])
         end
         return out, outl[0]
-    end
-
-    function decryptor:finalize()
-        local ptr, len = decryptor:finalize_raw()
-        if not ptr then
-            return nil, len
-        end
-        if len == 0 then
-            return ""
-        end
-        return ffi.string(ptr, len)
     end
 
     return decryptor

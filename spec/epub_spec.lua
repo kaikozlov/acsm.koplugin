@@ -1,3 +1,4 @@
+local ffi = require("ffi")
 local epub = require("adobe.epub")
 local nativecrypto = require("adobe.util.nativecrypto")
 local zlib = require("adobe.util.zlib")
@@ -5,45 +6,58 @@ local zlib = require("adobe.util.zlib")
 describe("epub module", function()
 
     -- ---------------------------------------------------------------
-    -- stripPkcs7
+    -- stripPkcs7Held (operates on FFI buffer)
     -- ---------------------------------------------------------------
-    describe("_stripPkcs7", function()
+    describe("_stripPkcs7Held", function()
+        local function makeBuf(str)
+            local buf = ffi.new("uint8_t[?]", #str)
+            ffi.copy(buf, str, #str)
+            return buf, #str
+        end
+
         it("should strip padding of 1", function()
-            local data = "hello world" .. string.char(1)
-            local result = epub._stripPkcs7(data)
-            assert.are.equal("hello world", result)
+            local buf, len = makeBuf("hello world" .. string.char(1))
+            local result = epub._stripPkcs7Held(buf, len)
+            assert.are.equal(#"hello world", result)
         end)
 
         it("should strip padding of 16", function()
-            local data = string.rep(string.char(16), 16)
-            local result = epub._stripPkcs7(data)
-            assert.are.equal("", result)
+            local buf, len = makeBuf(string.rep(string.char(16), 16))
+            local result = epub._stripPkcs7Held(buf, len)
+            assert.are.equal(0, result)
         end)
 
         it("should strip padding of 5", function()
-            local data = "test" .. string.rep(string.char(5), 5)
-            local result = epub._stripPkcs7(data)
-            assert.are.equal("test", result)
+            local buf, len = makeBuf("test" .. string.rep(string.char(5), 5))
+            local result = epub._stripPkcs7Held(buf, len)
+            assert.are.equal(#"test", result)
         end)
 
         it("should reject padding of 0", function()
-            local data = "hello" .. string.char(0)
-            local result, err = epub._stripPkcs7(data)
+            local buf, len = makeBuf("hello" .. string.char(0))
+            local result, err = epub._stripPkcs7Held(buf, len)
             assert.is_nil(result)
             assert.is.truthy(err:find("PKCS"))
         end)
 
         it("should reject padding > 16", function()
-            local data = "hello" .. string.char(17)
-            local result, err = epub._stripPkcs7(data)
+            local buf, len = makeBuf("hello" .. string.char(17))
+            local result, err = epub._stripPkcs7Held(buf, len)
             assert.is_nil(result)
             assert.is.truthy(err:find("PKCS"))
         end)
 
         it("should handle single byte with padding 1", function()
-            local data = string.char(1)
-            local result = epub._stripPkcs7(data)
-            assert.are.equal("", result)
+            local buf, len = makeBuf(string.char(1))
+            local result = epub._stripPkcs7Held(buf, len)
+            assert.are.equal(0, result)
+        end)
+
+        it("should reject empty buffer", function()
+            local buf = ffi.new("uint8_t[1]")
+            local result, err = epub._stripPkcs7Held(buf, 0)
+            assert.is_nil(result)
+            assert.is.truthy(err:find("PKCS"))
         end)
     end)
 
@@ -163,42 +177,14 @@ describe("epub module", function()
     end)
 
     -- ---------------------------------------------------------------
-    -- decryptAdeptEntry (in-memory, round-trip with known key)
-    -- ---------------------------------------------------------------
-    describe("_decryptAdeptEntry", function()
-        it("should round-trip encrypt/decrypt with known key", function()
-            local plaintext = "Hello, this is a test of Adobe ADEPT decryption!"
-
-            -- Compress
-            local ffi = require("ffi")
-            -- We'll test without compression (noDecomp=true) for simplicity
-            -- since we can't easily raw-deflate in Lua
-
-            -- Build encrypted blob: 16-byte random prefix + plaintext + PKCS7 padding
-            local prefix = string.rep("\0", 16) -- zero prefix for testing
-            local padLen = 16 - (#plaintext % 16)
-            local padded = prefix .. plaintext .. string.rep(string.char(padLen), padLen)
-
-            -- Encrypt with AES-CBC
-            local key = string.rep("\1", 16) -- test key
-            local iv = string.rep("\0", 16)
-            local encrypted = assert(nativecrypto.aes_cbc_encrypt(key, iv, padded, true))
-
-            -- Decrypt
-            local decrypted = assert(epub._decryptAdeptEntry(encrypted, key, true))
-            assert.are.equal(plaintext, decrypted)
-        end)
-    end)
-
-    -- ---------------------------------------------------------------
-    -- decryptAdeptEntryFile (streaming, same round-trip)
+    -- decryptAdeptEntryFile (streaming file-to-file)
     -- ---------------------------------------------------------------
     describe("_decryptAdeptEntryFile", function()
-        it("should decrypt a file in-place and produce same result as in-memory", function()
+        it("should decrypt a file in-place", function()
             local plaintext = "Streaming decryption test with enough data to be meaningful. "
             plaintext = string.rep(plaintext, 20) -- ~1.2KB
 
-            -- Build encrypted blob
+            -- Build encrypted blob: 16-byte prefix + plaintext + PKCS7 padding
             local prefix = string.rep("\0", 16)
             local padLen = 16 - (#plaintext % 16)
             local padded = prefix .. plaintext .. string.rep(string.char(padLen), padLen)
@@ -262,7 +248,7 @@ describe("epub module", function()
     -- Streaming AES decryptor
     -- ---------------------------------------------------------------
     describe("streaming AES decryptor", function()
-        it("should produce same output as one-shot decrypt", function()
+        it("should produce same output as one-shot decrypt via sink", function()
             local data = string.rep("A", 1024)
             local key = string.rep("\4", 16)
             local iv = string.rep("\0", 16)
@@ -273,22 +259,30 @@ describe("epub module", function()
             -- One-shot decrypt
             local oneshot = assert(nativecrypto.aes_cbc_decrypt(key, iv, encrypted, true))
 
-            -- Streaming decrypt in 128-byte chunks
+            -- Streaming decrypt in 128-byte chunks with sink
             local decryptor = assert(nativecrypto.aes_cbc_decryptor(key, iv, true))
             local parts = {}
             local chunkSize = 128
             for i = 1, #encrypted, chunkSize do
                 local chunk = encrypted:sub(i, math.min(i + chunkSize - 1, #encrypted))
-                parts[#parts + 1] = assert(decryptor:update(chunk))
+                local ok, err = decryptor:update(chunk, function(ptr, len)
+                    parts[#parts + 1] = ffi.string(ptr, len)
+                    return true
+                end)
+                assert.is_truthy(ok, err)
             end
-            parts[#parts + 1] = assert(decryptor:finalize())
+            local ok, err = decryptor:finalize(function(ptr, len)
+                parts[#parts + 1] = ffi.string(ptr, len)
+                return true
+            end)
+            assert.is_truthy(ok, err)
             local streamed = table.concat(parts)
 
             assert.are.equal(oneshot, streamed)
         end)
 
-        it("should support raw sink updates without changing output", function()
-            local data = string.rep("B", 2048)
+        it("should return ptr and len without sink", function()
+            local data = string.rep("B", 256)
             local key = string.rep("\5", 16)
             local iv = string.rep("\0", 16)
 
@@ -297,19 +291,18 @@ describe("epub module", function()
 
             local decryptor = assert(nativecrypto.aes_cbc_decryptor(key, iv, true))
             local parts = {}
-            for i = 1, #encrypted, 96 do
-                local chunk = encrypted:sub(i, math.min(i + 95, #encrypted))
-                local ok, err = decryptor:update_raw(chunk, function(ptr, len)
-                    parts[#parts + 1] = require("ffi").string(ptr, len)
-                    return true
-                end)
-                assert.is_truthy(ok, err)
+
+            local ptr, len = decryptor:update(encrypted)
+            assert.is_truthy(ptr)
+            if len > 0 then
+                parts[#parts + 1] = ffi.string(ptr, len)
             end
-            local ok, err = decryptor:finalize_raw(function(ptr, len)
-                parts[#parts + 1] = require("ffi").string(ptr, len)
-                return true
-            end)
-            assert.is_truthy(ok, err)
+
+            ptr, len = decryptor:finalize()
+            assert.is_truthy(ptr)
+            if len > 0 then
+                parts[#parts + 1] = ffi.string(ptr, len)
+            end
 
             assert.are.equal(oneshot, table.concat(parts))
         end)
@@ -319,18 +312,7 @@ describe("epub module", function()
     -- Streaming zlib inflater
     -- ---------------------------------------------------------------
     describe("streaming zlib inflater", function()
-        it("should produce same output as one-shot inflate", function()
-            -- Create some compressible data, compress it with the one-shot API
-            -- by using the encrypt/decrypt trick: we need raw deflated data.
-            -- Instead, let's just test that inflater handles a known inflate stream.
-
-            -- Use zlib.inflateRaw on a known good stream, then compare with streaming
-            local ffi = require("ffi")
-
-            -- Create test data: a simple raw deflate stream
-            -- We'll generate one by using a round-trip approach:
-            -- zlib doesn't have a compress function exposed, so let's test
-            -- that the streaming inflater at least initializes and finalizes
+        it("should initialize and finalize cleanly", function()
             local inflater, err = zlib.rawInflater()
             assert.is.truthy(inflater, err)
             inflater:finalize()

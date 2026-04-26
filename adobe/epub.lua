@@ -19,13 +19,9 @@ local CHUNK_SIZE = 65536  -- 64KB chunks for streaming decrypt
 local WATERMARK_SCAN_BYTES = 16384
 local FILE_IOFBF = 0
 
+require("ffi/posix_h")  -- FILE, fopen, fwrite, fclose, strerror
 ffi.cdef [[
-typedef struct FILE FILE;
-FILE *fopen(const char *pathname, const char *mode);
-size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
-int fclose(FILE *stream);
 int setvbuf(FILE *stream, char *buf, int mode, size_t size);
-char *strerror(int errnum);
 ]]
 
 local function removeTree(path)
@@ -97,14 +93,6 @@ local function parseEncryptionXml(encryptionXml)
     }
 end
 
-local function stripPkcs7(data)
-    local pad = data:byte(-1)
-    if not pad or pad < 1 or pad > 16 then
-        return nil, "Invalid PKCS#7 padding"
-    end
-    return data:sub(1, #data - pad)
-end
-
 local function stripPkcs7Held(buf, len)
     if len < 1 then
         return nil, "Invalid PKCS#7 padding"
@@ -160,30 +148,6 @@ local function openBufferedOutput(path, size)
     return writer
 end
 
---- Decrypt an Adobe ADEPT encrypted entry (in-memory version).
--- Kept for backward compatibility and testing.
-local function decryptAdeptEntry(data, bookKey, noDecomp)
-    local decrypted, err = nativecrypto.aes_cbc_decrypt(bookKey, string.rep("\0", 16), data, true)
-    if err then
-        return nil, err
-    end
-    decrypted = decrypted:sub(17)
-
-    decrypted, err = stripPkcs7(decrypted)
-    if not decrypted then
-        return nil, err
-    end
-
-    if not noDecomp then
-        local inflated, inflateErr = zlib.inflateRaw(decrypted)
-        if not inflated then
-            inflated = decrypted
-        end
-        decrypted = inflated
-    end
-
-    return decrypted
-end
 
 --- Decrypt an Adobe ADEPT encrypted file in-place using streaming.
 -- Reads the input in CHUNK_SIZE chunks, decrypts via streaming AES-CBC,
@@ -239,7 +203,7 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
             return true
         end
         if inflater then
-            return inflater:update_raw(ptr, len, function(outPtr, outLen)
+            return inflater:update(ptr, len, function(outPtr, outLen)
                 return outWriter:write(outPtr, outLen)
             end)
         end
@@ -283,7 +247,7 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
         local chunk = inFile:read(CHUNK_SIZE)
         if not chunk then break end
 
-        local ok, updateErr = decryptor:update_raw(chunk, processDecrypted)
+        local ok, updateErr = decryptor:update(chunk, processDecrypted)
         if not ok then
             readErr = "decrypt update failed: " .. tostring(updateErr)
             break
@@ -293,7 +257,7 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
 
     if not readErr then
         -- Finalize decryption
-        local ok, finErr = decryptor:finalize_raw(processDecrypted)
+        local ok, finErr = decryptor:finalize(processDecrypted)
         if not ok then
             readErr = "decrypt finalize failed: " .. tostring(finErr)
         end
@@ -405,17 +369,10 @@ local function repackEpub(workDir, outputPath)
                 writer:close()
                 return nil, "Missing repack input: " .. relPath
             end
-            local ok = writer:addPath(relPath, fullPath, false, mtime)
-            -- KOReader's Archiver.Writer:addPath() returns false when it stops on
-            -- ARCHIVE_EOF, even if the entry was written successfully. It only
-            -- populates writer.err on actual failures, so treat false/nil+no err
-            -- as success here.
-            if ok == false and writer.err == nil then
-                ok = true
-            end
-            if not ok then
+            writer:addPath(relPath, fullPath, false, mtime)
+            if writer.err then
                 writer:close()
-                return nil, writer.err or ("Could not write " .. relPath)
+                return nil, writer.err
             end
         end
     end
@@ -484,7 +441,7 @@ local function stripAdeptWatermarks(workDir)
     local modifiedFiles = 0
     for _, relPath in ipairs(files) do
         local lowerRelPath = relPath:lower()
-        if lowerRelPath:match("%.xhtml$") or lowerRelPath:match("%.html$") or lowerRelPath:match("%.opf$") then
+        if lowerRelPath:match("%.xhtml$") or lowerRelPath:match("%.html$") or lowerRelPath:match("%.xml$") or lowerRelPath:match("%.opf$") then
             local fullPath = workDir .. "/" .. relPath
             local prefixFile = io.open(fullPath, "rb")
             if prefixFile then
@@ -597,9 +554,8 @@ end
 
 -- Export internal functions for testing (underscore-prefixed = internal API)
 epub._parseEncryptionXml = parseEncryptionXml
-epub._stripPkcs7 = stripPkcs7
+epub._stripPkcs7Held = stripPkcs7Held
 epub._stripAdeptWatermarksFromText = stripAdeptWatermarksFromText
-epub._decryptAdeptEntry = decryptAdeptEntry
 epub._decryptAdeptEntryFile = decryptAdeptEntryFile
 
 return epub

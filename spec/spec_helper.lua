@@ -187,6 +187,25 @@ package.preload["ffi.sha2"] = function()
 end
 
 ---------------------------------------------------------------------
+-- Mock: ffi/posix_h  (KOReader's POSIX cdef declarations)
+-- On the host dev machine, LuaJIT already has these symbols
+-- available via ffi.C. We just need the type declarations.
+---------------------------------------------------------------------
+package.preload["ffi/posix_h"] = function()
+    local ffi = require("ffi")
+    -- Only declare if not already declared (safe re-entry)
+    pcall(ffi.cdef, [[
+        typedef struct FILE FILE;
+        FILE *fopen(const char *, const char *);
+        size_t fwrite(const void *, size_t, size_t, FILE *);
+        size_t fread(void *, size_t, size_t, FILE *);
+        int fclose(FILE *);
+        int fflush(FILE *);
+        char *strerror(int);
+    ]])
+end
+
+---------------------------------------------------------------------
 -- Mock: ffi/loadlib  (no-op, only needed on device)
 ---------------------------------------------------------------------
 package.preload["ffi/loadlib"] = function()

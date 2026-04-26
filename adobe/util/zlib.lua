@@ -134,13 +134,12 @@ function zlib.rawInflater()
 
     local inflater = {}
 
-    function inflater:update_raw(chunk, chunk_len, sink)
+    --- Inflate a chunk of compressed data.
+    -- @param chunk     FFI pointer or Lua string containing compressed data
+    -- @param chunk_len length of the chunk in bytes
+    -- @param sink      function(ptr, len) called with each output block
+    function inflater:update(chunk, chunk_len, sink)
         if finished then return nil, "inflater already finalized" end
-        if type(chunk_len) == "function" and sink == nil then
-            sink = chunk_len
-            chunk_len = nil
-        end
-        chunk_len = chunk_len or #chunk
         stream[0].next_in = ffi.cast("Bytef *", chunk)
         stream[0].avail_in = chunk_len
 
@@ -167,18 +166,6 @@ function zlib.rawInflater()
             end
         end
         return true
-    end
-
-    function inflater:update(chunk)
-        local parts = {}
-        local ok, err = inflater:update_raw(chunk, #chunk, function(ptr, len)
-            parts[#parts + 1] = ffi.string(ptr, len)
-            return true
-        end)
-        if not ok then
-            return nil, err
-        end
-        return table.concat(parts)
     end
 
     function inflater:finalize()
