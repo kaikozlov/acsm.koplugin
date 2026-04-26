@@ -14,6 +14,8 @@ local XMLENC = "http://www.w3.org/2001/04/xmlenc#"
 local AES128_CBC = "http://www.w3.org/2001/04/xmlenc#aes128-cbc"
 local AES128_CBC_UNCOMPRESSED = "http://ns.adobe.com/adept/xmlenc#aes128-cbc-uncompressed"
 
+local CHUNK_SIZE = 65536  -- 64KB chunks for streaming decrypt
+
 local function removeTree(path)
     if not path or path == "" or lfs.attributes(path, "mode") ~= "directory" then
         return
@@ -91,6 +93,8 @@ local function stripPkcs7(data)
     return data:sub(1, #data - pad)
 end
 
+--- Decrypt an Adobe ADEPT encrypted entry (in-memory version).
+-- Kept for backward compatibility and testing.
 local function decryptAdeptEntry(data, bookKey, noDecomp)
     local decrypted, err = nativecrypto.aes_cbc_decrypt(bookKey, string.rep("\0", 16), data, true)
     if err then
@@ -112,6 +116,166 @@ local function decryptAdeptEntry(data, bookKey, noDecomp)
     end
 
     return decrypted
+end
+
+--- Decrypt an Adobe ADEPT encrypted file in-place using streaming.
+-- Reads the input in CHUNK_SIZE chunks, decrypts via streaming AES-CBC,
+-- optionally inflates via streaming zlib, and writes to a temp file.
+-- Peak memory: ~2 × CHUNK_SIZE regardless of file size.
+local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
+    local inFile, inErr = io.open(fullPath, "rb")
+    if not inFile then
+        return nil, "Cannot open encrypted file: " .. tostring(inErr)
+    end
+
+    local tmpPath = fullPath .. ".dec"
+    local outFile, outErr = io.open(tmpPath, "wb")
+    if not outFile then
+        inFile:close()
+        return nil, "Cannot create temp file: " .. tostring(outErr)
+    end
+
+    -- Create streaming decryptor (zero IV, no padding — we handle PKCS7 manually)
+    local decryptor, decErr = nativecrypto.aes_cbc_decryptor(bookKey, string.rep("\0", 16), true)
+    if not decryptor then
+        inFile:close()
+        outFile:close()
+        os.remove(tmpPath)
+        return nil, "Failed to create decryptor: " .. tostring(decErr)
+    end
+
+    -- Optionally create streaming inflater
+    local inflater = nil
+    if not noDecomp then
+        local infErr
+        inflater, infErr = zlib.rawInflater()
+        if not inflater then
+            inFile:close()
+            outFile:close()
+            os.remove(tmpPath)
+            return nil, "Failed to create inflater: " .. tostring(infErr)
+        end
+    end
+
+    -- We need to:
+    -- 1. Skip the first 16 bytes of decrypted output (random prefix)
+    -- 2. Strip PKCS7 padding from the final block
+    -- Strategy: accumulate decrypted output, skip first 16, hold back last 16
+    --           for PKCS7 check at the end.
+    local skipRemaining = 16  -- bytes to skip from start of decrypted stream
+    local held = ""           -- last 16 bytes held back for PKCS7
+
+    local function processDecrypted(chunk)
+        -- Skip the first 16 bytes of the decrypted stream
+        if skipRemaining > 0 then
+            if #chunk <= skipRemaining then
+                skipRemaining = skipRemaining - #chunk
+                return true
+            end
+            chunk = chunk:sub(skipRemaining + 1)
+            skipRemaining = 0
+        end
+
+        -- Prepend any previously held bytes
+        chunk = held .. chunk
+
+        -- Hold back the last 16 bytes for PKCS7 stripping at finalize
+        if #chunk <= 16 then
+            held = chunk
+            return true
+        end
+        held = chunk:sub(-16)
+        chunk = chunk:sub(1, -17)
+
+        -- Decompress or write directly
+        if inflater then
+            local inflated, infErr = inflater:update(chunk)
+            if not inflated then
+                return nil, "inflate failed: " .. tostring(infErr)
+            end
+            if #inflated > 0 then
+                outFile:write(inflated)
+            end
+        else
+            outFile:write(chunk)
+        end
+        return true
+    end
+
+    -- Read and process chunks
+    local readErr = nil
+    while true do
+        local chunk = inFile:read(CHUNK_SIZE)
+        if not chunk then break end
+
+        local decrypted, updateErr = decryptor:update(chunk)
+        if not decrypted then
+            readErr = "decrypt update failed: " .. tostring(updateErr)
+            break
+        end
+        if #decrypted > 0 then
+            local ok, procErr = processDecrypted(decrypted)
+            if not ok then
+                readErr = procErr
+                break
+            end
+        end
+
+        -- Let GC clean up intermediate strings
+        chunk = nil
+        decrypted = nil
+    end
+    inFile:close()
+
+    if not readErr then
+        -- Finalize decryption
+        local finalBytes, finErr = decryptor:finalize()
+        if not finalBytes then
+            readErr = "decrypt finalize failed: " .. tostring(finErr)
+        elseif #finalBytes > 0 then
+            local ok, procErr = processDecrypted(finalBytes)
+            if not ok then readErr = procErr end
+        end
+    end
+
+    if not readErr then
+        -- Strip PKCS7 from held bytes and write remainder
+        local stripped, pkcsErr = stripPkcs7(held)
+        if not stripped then
+            readErr = "PKCS7 strip failed: " .. tostring(pkcsErr)
+        elseif #stripped > 0 then
+            if inflater then
+                local inflated, infErr = inflater:update(stripped)
+                if not inflated then
+                    readErr = "final inflate failed: " .. tostring(infErr)
+                elseif #inflated > 0 then
+                    outFile:write(inflated)
+                end
+            else
+                outFile:write(stripped)
+            end
+        end
+    end
+
+    if inflater then
+        inflater:finalize()
+    end
+    outFile:close()
+
+    if readErr then
+        os.remove(tmpPath)
+        return nil, readErr
+    end
+
+    -- Replace original with decrypted version
+    os.remove(fullPath)
+    local ok, renameErr = os.rename(tmpPath, fullPath)
+    if not ok then
+        os.remove(tmpPath)
+        return nil, "Failed to rename decrypted file: " .. tostring(renameErr)
+    end
+
+    return true
 end
 
 local function makeTempDir()
@@ -188,6 +352,8 @@ local function repackEpub(workDir, outputPath)
                 writer:close()
                 return nil, writer.err or ("Could not write " .. relPath)
             end
+            content = nil
+            collectgarbage("collect")
         end
     end
 
@@ -212,15 +378,10 @@ local function extractEpub(inputPath, workDir)
                     return nil, err
                 end
             end
-            local content = reader:extractToMemory(entry.path)
-            if content == nil then
-                reader:close()
-                return nil, reader.err or ("Could not extract " .. entry.path)
-            end
-            local ok, err = koutil.writeToFile(content, fullPath)
+            local ok = reader:extractToPath(entry.path, fullPath)
             if not ok then
                 reader:close()
-                return nil, err
+                return nil, reader.err or ("Could not extract " .. entry.path)
             end
         end
     end
@@ -300,17 +461,12 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
     local decryptCount = 0
     for relPath in pairs(parsed.encrypted) do
         local fullPath = workDir .. "/" .. relPath
-        local encryptedData = koutil.readFromFile(fullPath, "rb")
-        if not encryptedData then
+        local decOk, decErr = decryptAdeptEntryFile(fullPath, bookKey, false)
+        if not decOk then
             removeTree(workDir)
-            return nil, "Missing encrypted file: " .. relPath
+            return nil, "Failed to decrypt " .. relPath .. ": " .. decErr
         end
-        local decryptedData, err = decryptAdeptEntry(encryptedData, bookKey, false)
-        if not decryptedData then
-            removeTree(workDir)
-            return nil, "Failed to decrypt " .. relPath .. ": " .. err
-        end
-        assert(koutil.writeToFile(decryptedData, fullPath))
+        collectgarbage("collect")
         decryptCount = decryptCount + 1
     end
     logger.info("[ACSM] decryptAdobeEpub: decrypted", decryptCount, "entries with decompression")
@@ -318,17 +474,12 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
     local forceNoDecompCount = 0
     for relPath in pairs(parsed.encryptedForceNoDecomp) do
         local fullPath = workDir .. "/" .. relPath
-        local encryptedData = koutil.readFromFile(fullPath, "rb")
-        if not encryptedData then
+        local decOk, decErr = decryptAdeptEntryFile(fullPath, bookKey, true)
+        if not decOk then
             removeTree(workDir)
-            return nil, "Missing encrypted file: " .. relPath
+            return nil, "Failed to decrypt " .. relPath .. ": " .. decErr
         end
-        local decryptedData, err = decryptAdeptEntry(encryptedData, bookKey, true)
-        if not decryptedData then
-            removeTree(workDir)
-            return nil, "Failed to decrypt " .. relPath .. ": " .. err
-        end
-        assert(koutil.writeToFile(decryptedData, fullPath))
+        collectgarbage("collect")
         forceNoDecompCount = forceNoDecompCount + 1
     end
     logger.info("[ACSM] decryptAdobeEpub: decrypted", forceNoDecompCount, "entries without decompression")
@@ -368,5 +519,12 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
         strippedWatermarkFiles = watermarkFiles,
     }
 end
+
+-- Export internal functions for testing (underscore-prefixed = internal API)
+epub._parseEncryptionXml = parseEncryptionXml
+epub._stripPkcs7 = stripPkcs7
+epub._stripAdeptWatermarksFromText = stripAdeptWatermarksFromText
+epub._decryptAdeptEntry = decryptAdeptEntry
+epub._decryptAdeptEntryFile = decryptAdeptEntryFile
 
 return epub

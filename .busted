@@ -1,0 +1,7 @@
+return {
+    default = {
+        lpath = "./?.lua;./dependencies/?.lua",
+        ROOT = {"spec/"},
+        helper = "spec/spec_helper.lua",
+    },
+}

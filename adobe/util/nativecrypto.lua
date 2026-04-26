@@ -272,6 +272,53 @@ function nativecrypto.aes_cbc_decrypt(key, iv, data, no_padding)
     return evp_cipher(false, key, iv, data, no_padding)
 end
 
+--- Create a streaming AES-128-CBC decryptor.
+-- Returns an object with :update(chunk) and :finalize() methods.
+-- Each :update() returns the decrypted output for that chunk.
+-- :finalize() returns any remaining bytes and frees the context.
+-- Peak memory per update: chunk_size + 32 bytes for the FFI output buffer.
+function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
+    local ctx = libcrypto.EVP_CIPHER_CTX_new()
+    if ctx == nil then
+        return nil, "EVP_CIPHER_CTX_new failed"
+    end
+    ffi.gc(ctx, libcrypto.EVP_CIPHER_CTX_free)
+
+    local ok = libcrypto.EVP_DecryptInit_ex(ctx, libcrypto.EVP_aes_128_cbc(), nil, key, iv)
+    if ok ~= 1 then
+        return nil, "EVP_DecryptInit_ex failed"
+    end
+    if no_padding then
+        libcrypto.EVP_CIPHER_CTX_set_padding(ctx, 0)
+    end
+
+    local outl = ffi.new("int[1]")
+    local finalized = false
+
+    local decryptor = {}
+
+    function decryptor:update(chunk)
+        if finalized then return nil, "decryptor already finalized" end
+        local out = ffi.new("unsigned char[?]", #chunk + 32)
+        if libcrypto.EVP_DecryptUpdate(ctx, out, outl, chunk, #chunk) ~= 1 then
+            return nil, "EVP_DecryptUpdate failed"
+        end
+        return ffi.string(out, outl[0])
+    end
+
+    function decryptor:finalize()
+        if finalized then return nil, "decryptor already finalized" end
+        finalized = true
+        local out = ffi.new("unsigned char[32]")
+        if libcrypto.EVP_DecryptFinal_ex(ctx, out, outl) ~= 1 then
+            return nil, "EVP_DecryptFinal_ex failed"
+        end
+        return ffi.string(out, outl[0])
+    end
+
+    return decryptor
+end
+
 function nativecrypto.key_from_private_der(der)
     local p = der_pointer(der)
     local ctx = libcrypto.d2i_AutoPrivateKey(nil, p, #der)

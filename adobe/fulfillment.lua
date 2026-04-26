@@ -2,6 +2,7 @@ local fulfillment = {}
 
 local DataStorage = require("datastorage")
 local http = require("socket.http")
+local lfs = require("libs/libkoreader-lfs")
 local ltn12 = require("ltn12")
 local logger = require("logger")
 local socket = require("socket")
@@ -322,11 +323,11 @@ function fulfillment.downloadBook(srcUrl, outputPath)
         return nil, code
     end
 
-    local data = koutil.readFromFile(outputPath, "rb")
-    if not data or data == "" then
+    local attr = lfs.attributes(outputPath)
+    if not attr or attr.size == 0 then
         return nil, "Book download failed: " .. tostring(code)
     end
-    return data
+    return true
 end
 
 function fulfillment.decryptBookKey(encryptedKeyB64, licenseKey)
