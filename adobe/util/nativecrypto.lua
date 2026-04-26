@@ -276,7 +276,7 @@ end
 -- Returns an object with :update(chunk) and :finalize() methods.
 -- Each :update() returns the decrypted output for that chunk.
 -- :finalize() returns any remaining bytes and frees the context.
--- Peak memory per update: chunk_size + 32 bytes for the FFI output buffer.
+-- The output buffer is allocated once and reused across update() calls.
 function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
     local ctx = libcrypto.EVP_CIPHER_CTX_new()
     if ctx == nil then
@@ -293,13 +293,19 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
     end
 
     local outl = ffi.new("int[1]")
+    local out = nil      -- lazily allocated, reused across update() calls
+    local out_cap = 0    -- capacity of the current buffer
     local finalized = false
 
     local decryptor = {}
 
     function decryptor:update(chunk)
         if finalized then return nil, "decryptor already finalized" end
-        local out = ffi.new("unsigned char[?]", #chunk + 32)
+        local needed = #chunk + 32
+        if needed > out_cap then
+            out = ffi.new("unsigned char[?]", needed)
+            out_cap = needed
+        end
         if libcrypto.EVP_DecryptUpdate(ctx, out, outl, chunk, #chunk) ~= 1 then
             return nil, "EVP_DecryptUpdate failed"
         end
@@ -309,7 +315,10 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
     function decryptor:finalize()
         if finalized then return nil, "decryptor already finalized" end
         finalized = true
-        local out = ffi.new("unsigned char[32]")
+        -- Final block is at most 32 bytes; reuse buffer if large enough
+        if out_cap < 32 then
+            out = ffi.new("unsigned char[32]")
+        end
         if libcrypto.EVP_DecryptFinal_ex(ctx, out, outl) ~= 1 then
             return nil, "EVP_DecryptFinal_ex failed"
         end

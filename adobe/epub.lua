@@ -160,10 +160,25 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
     -- We need to:
     -- 1. Skip the first 16 bytes of decrypted output (random prefix)
     -- 2. Strip PKCS7 padding from the final block
-    -- Strategy: accumulate decrypted output, skip first 16, hold back last 16
-    --           for PKCS7 check at the end.
+    -- Strategy: skip first 16, hold back last 16 for PKCS7 check.
+    -- Held bytes are flushed when new data arrives (proving they aren't final).
     local skipRemaining = 16  -- bytes to skip from start of decrypted stream
     local held = ""           -- last 16 bytes held back for PKCS7
+
+    local function writeThrough(data)
+        if inflater then
+            local inflated, infErr = inflater:update(data)
+            if not inflated then
+                return nil, "inflate failed: " .. tostring(infErr)
+            end
+            if #inflated > 0 then
+                outFile:write(inflated)
+            end
+        else
+            outFile:write(data)
+        end
+        return true
+    end
 
     local function processDecrypted(chunk)
         -- Skip the first 16 bytes of the decrypted stream
@@ -176,30 +191,22 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
             skipRemaining = 0
         end
 
-        -- Prepend any previously held bytes
-        chunk = held .. chunk
+        -- Flush previously held bytes (they're not the final block since more data arrived)
+        if #held > 0 then
+            local ok, err = writeThrough(held)
+            if not ok then return nil, err end
+            held = ""
+        end
 
-        -- Hold back the last 16 bytes for PKCS7 stripping at finalize
+        -- Hold back the last 16 bytes of this chunk for PKCS7 stripping
         if #chunk <= 16 then
             held = chunk
             return true
         end
         held = chunk:sub(-16)
-        chunk = chunk:sub(1, -17)
+        local toWrite = chunk:sub(1, -17)
 
-        -- Decompress or write directly
-        if inflater then
-            local inflated, infErr = inflater:update(chunk)
-            if not inflated then
-                return nil, "inflate failed: " .. tostring(infErr)
-            end
-            if #inflated > 0 then
-                outFile:write(inflated)
-            end
-        else
-            outFile:write(chunk)
-        end
-        return true
+        return writeThrough(toWrite)
     end
 
     -- Read and process chunks
@@ -220,10 +227,6 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
                 break
             end
         end
-
-        -- Let GC clean up intermediate strings
-        chunk = nil
-        decrypted = nil
     end
     inFile:close()
 
@@ -353,7 +356,6 @@ local function repackEpub(workDir, outputPath)
                 return nil, writer.err or ("Could not write " .. relPath)
             end
             content = nil
-            collectgarbage("collect")
         end
     end
 
@@ -466,7 +468,8 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
             removeTree(workDir)
             return nil, "Failed to decrypt " .. relPath .. ": " .. decErr
         end
-        collectgarbage("collect")
+        decOk = nil
+        collectgarbage("step", 200)
         decryptCount = decryptCount + 1
     end
     logger.info("[ACSM] decryptAdobeEpub: decrypted", decryptCount, "entries with decompression")
@@ -479,7 +482,8 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
             removeTree(workDir)
             return nil, "Failed to decrypt " .. relPath .. ": " .. decErr
         end
-        collectgarbage("collect")
+        decOk = nil
+        collectgarbage("step", 200)
         forceNoDecompCount = forceNoDecompCount + 1
     end
     logger.info("[ACSM] decryptAdobeEpub: decrypted", forceNoDecompCount, "entries without decompression")
