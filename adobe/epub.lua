@@ -20,9 +20,7 @@ local WATERMARK_SCAN_BYTES = 16384
 local FILE_IOFBF = 0
 
 require("ffi/posix_h")  -- FILE, fopen, fwrite, fclose, strerror
-ffi.cdef [[
-int setvbuf(FILE *stream, char *buf, int mode, size_t size);
-]]
+pcall(ffi.cdef, "int setvbuf(FILE *stream, char *buf, int mode, size_t size);")
 
 local function removeTree(path)
     if not path or path == "" or lfs.attributes(path, "mode") ~= "directory" then
