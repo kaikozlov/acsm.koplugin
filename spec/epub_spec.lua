@@ -286,6 +286,33 @@ describe("epub module", function()
 
             assert.are.equal(oneshot, streamed)
         end)
+
+        it("should support raw sink updates without changing output", function()
+            local data = string.rep("B", 2048)
+            local key = string.rep("\5", 16)
+            local iv = string.rep("\0", 16)
+
+            local encrypted = assert(nativecrypto.aes_cbc_encrypt(key, iv, data, true))
+            local oneshot = assert(nativecrypto.aes_cbc_decrypt(key, iv, encrypted, true))
+
+            local decryptor = assert(nativecrypto.aes_cbc_decryptor(key, iv, true))
+            local parts = {}
+            for i = 1, #encrypted, 96 do
+                local chunk = encrypted:sub(i, math.min(i + 95, #encrypted))
+                local ok, err = decryptor:update_raw(chunk, function(ptr, len)
+                    parts[#parts + 1] = require("ffi").string(ptr, len)
+                    return true
+                end)
+                assert.is_truthy(ok, err)
+            end
+            local ok, err = decryptor:finalize_raw(function(ptr, len)
+                parts[#parts + 1] = require("ffi").string(ptr, len)
+                return true
+            end)
+            assert.is_truthy(ok, err)
+
+            assert.are.equal(oneshot, table.concat(parts))
+        end)
     end)
 
     -- ---------------------------------------------------------------

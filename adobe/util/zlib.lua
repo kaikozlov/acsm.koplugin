@@ -134,20 +134,27 @@ function zlib.rawInflater()
 
     local inflater = {}
 
-    function inflater:update(chunk)
+    function inflater:update_raw(chunk, chunk_len, sink)
         if finished then return nil, "inflater already finalized" end
+        if type(chunk_len) == "function" and sink == nil then
+            sink = chunk_len
+            chunk_len = nil
+        end
+        chunk_len = chunk_len or #chunk
         stream[0].next_in = ffi.cast("Bytef *", chunk)
-        stream[0].avail_in = #chunk
+        stream[0].avail_in = chunk_len
 
-        local parts = {}
         while stream[0].avail_in > 0 do
             stream[0].next_out = outbuf
             stream[0].avail_out = CHUNK_SIZE
 
             rc = libz.inflate(stream, Z_NO_FLUSH)
             local produced = CHUNK_SIZE - tonumber(stream[0].avail_out)
-            if produced > 0 then
-                parts[#parts + 1] = ffi.string(outbuf, produced)
+            if produced > 0 and sink then
+                local ok, err = sink(outbuf, produced)
+                if not ok then
+                    return nil, err
+                end
             end
 
             if rc == Z_STREAM_END then
@@ -158,6 +165,18 @@ function zlib.rawInflater()
                 libz.inflateEnd(stream)
                 return nil, "inflate failed: " .. tostring(rc)
             end
+        end
+        return true
+    end
+
+    function inflater:update(chunk)
+        local parts = {}
+        local ok, err = inflater:update_raw(chunk, #chunk, function(ptr, len)
+            parts[#parts + 1] = ffi.string(ptr, len)
+            return true
+        end)
+        if not ok then
+            return nil, err
         end
         return table.concat(parts)
     end

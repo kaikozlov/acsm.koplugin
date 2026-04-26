@@ -299,7 +299,7 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
 
     local decryptor = {}
 
-    function decryptor:update(chunk)
+    function decryptor:update_raw(chunk, sink)
         if finalized then return nil, "decryptor already finalized" end
         local needed = #chunk + 32
         if needed > out_cap then
@@ -309,20 +309,49 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
         if libcrypto.EVP_DecryptUpdate(ctx, out, outl, chunk, #chunk) ~= 1 then
             return nil, "EVP_DecryptUpdate failed"
         end
-        return ffi.string(out, outl[0])
+        if sink and outl[0] > 0 then
+            return sink(out, outl[0])
+        end
+        return out, outl[0]
     end
 
-    function decryptor:finalize()
+    function decryptor:update(chunk)
+        local ptr, len = decryptor:update_raw(chunk)
+        if not ptr then
+            return nil, len
+        end
+        if len == 0 then
+            return ""
+        end
+        return ffi.string(ptr, len)
+    end
+
+    function decryptor:finalize_raw(sink)
         if finalized then return nil, "decryptor already finalized" end
         finalized = true
         -- Final block is at most 32 bytes; reuse buffer if large enough
         if out_cap < 32 then
             out = ffi.new("unsigned char[32]")
+            out_cap = 32
         end
         if libcrypto.EVP_DecryptFinal_ex(ctx, out, outl) ~= 1 then
             return nil, "EVP_DecryptFinal_ex failed"
         end
-        return ffi.string(out, outl[0])
+        if sink and outl[0] > 0 then
+            return sink(out, outl[0])
+        end
+        return out, outl[0]
+    end
+
+    function decryptor:finalize()
+        local ptr, len = decryptor:finalize_raw()
+        if not ptr then
+            return nil, len
+        end
+        if len == 0 then
+            return ""
+        end
+        return ffi.string(ptr, len)
     end
 
     return decryptor

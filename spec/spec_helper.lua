@@ -279,6 +279,7 @@ package.preload["ffi/archiver"] = function()
     function Writer:open() return true end
     function Writer:setZipCompression() return true end
     function Writer:addFileFromMemory() return true end
+    function Writer:addPath() return true end
     function Writer:close() end
 
     return { Reader = Reader, Writer = Writer }

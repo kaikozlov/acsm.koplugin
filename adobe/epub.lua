@@ -1,5 +1,6 @@
 local epub = {}
 
+local ffi = require("ffi")
 local Archiver = require("ffi/archiver")
 local DataStorage = require("datastorage")
 local lfs = require("libs/libkoreader-lfs")
@@ -15,6 +16,17 @@ local AES128_CBC = "http://www.w3.org/2001/04/xmlenc#aes128-cbc"
 local AES128_CBC_UNCOMPRESSED = "http://ns.adobe.com/adept/xmlenc#aes128-cbc-uncompressed"
 
 local CHUNK_SIZE = 65536  -- 64KB chunks for streaming decrypt
+local WATERMARK_SCAN_BYTES = 16384
+local FILE_IOFBF = 0
+
+ffi.cdef [[
+typedef struct FILE FILE;
+FILE *fopen(const char *pathname, const char *mode);
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
+int fclose(FILE *stream);
+int setvbuf(FILE *stream, char *buf, int mode, size_t size);
+char *strerror(int errnum);
+]]
 
 local function removeTree(path)
     if not path or path == "" or lfs.attributes(path, "mode") ~= "directory" then
@@ -93,6 +105,61 @@ local function stripPkcs7(data)
     return data:sub(1, #data - pad)
 end
 
+local function stripPkcs7Held(buf, len)
+    if len < 1 then
+        return nil, "Invalid PKCS#7 padding"
+    end
+    local pad = tonumber(buf[len - 1])
+    if not pad or pad < 1 or pad > 16 or pad > len then
+        return nil, "Invalid PKCS#7 padding"
+    end
+    return len - pad
+end
+
+local function setLuaFileBuffer(file, size)
+    if not file or type(file.setvbuf) ~= "function" then
+        return
+    end
+    pcall(file.setvbuf, file, "full", size)
+end
+
+local function openBufferedOutput(path, size)
+    local stream = ffi.C.fopen(path, "wb")
+    if stream == nil then
+        return nil, "Cannot create temp file: " .. ffi.string(ffi.C.strerror(ffi.errno()))
+    end
+    ffi.gc(stream, ffi.C.fclose)
+    ffi.C.setvbuf(stream, nil, FILE_IOFBF, size)
+
+    local writer = {}
+
+    function writer:write(ptr, len)
+        if len <= 0 then
+            return true
+        end
+        local written = tonumber(ffi.C.fwrite(ptr, 1, len, stream))
+        if written ~= len then
+            return nil, "short write"
+        end
+        return true
+    end
+
+    function writer:close()
+        if stream == nil then
+            return true
+        end
+        ffi.gc(stream, nil)
+        local rc = ffi.C.fclose(stream)
+        stream = nil
+        if rc ~= 0 then
+            return nil, "close failed"
+        end
+        return true
+    end
+
+    return writer
+end
+
 --- Decrypt an Adobe ADEPT encrypted entry (in-memory version).
 -- Kept for backward compatibility and testing.
 local function decryptAdeptEntry(data, bookKey, noDecomp)
@@ -127,19 +194,20 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
     if not inFile then
         return nil, "Cannot open encrypted file: " .. tostring(inErr)
     end
+    setLuaFileBuffer(inFile, CHUNK_SIZE)
 
     local tmpPath = fullPath .. ".dec"
-    local outFile, outErr = io.open(tmpPath, "wb")
-    if not outFile then
+    local outWriter, outErr = openBufferedOutput(tmpPath, CHUNK_SIZE)
+    if not outWriter then
         inFile:close()
-        return nil, "Cannot create temp file: " .. tostring(outErr)
+        return nil, outErr
     end
 
     -- Create streaming decryptor (zero IV, no padding — we handle PKCS7 manually)
     local decryptor, decErr = nativecrypto.aes_cbc_decryptor(bookKey, string.rep("\0", 16), true)
     if not decryptor then
         inFile:close()
-        outFile:close()
+        outWriter:close()
         os.remove(tmpPath)
         return nil, "Failed to create decryptor: " .. tostring(decErr)
     end
@@ -151,7 +219,7 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
         inflater, infErr = zlib.rawInflater()
         if not inflater then
             inFile:close()
-            outFile:close()
+            outWriter:close()
             os.remove(tmpPath)
             return nil, "Failed to create inflater: " .. tostring(infErr)
         end
@@ -163,50 +231,50 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
     -- Strategy: skip first 16, hold back last 16 for PKCS7 check.
     -- Held bytes are flushed when new data arrives (proving they aren't final).
     local skipRemaining = 16  -- bytes to skip from start of decrypted stream
-    local held = ""           -- last 16 bytes held back for PKCS7
+    local held = ffi.new("uint8_t[16]")
+    local heldLen = 0
 
-    local function writeThrough(data)
-        if inflater then
-            local inflated, infErr = inflater:update(data)
-            if not inflated then
-                return nil, "inflate failed: " .. tostring(infErr)
-            end
-            if #inflated > 0 then
-                outFile:write(inflated)
-            end
-        else
-            outFile:write(data)
+    local function writeThrough(ptr, len)
+        if len <= 0 then
+            return true
         end
-        return true
+        if inflater then
+            return inflater:update_raw(ptr, len, function(outPtr, outLen)
+                return outWriter:write(outPtr, outLen)
+            end)
+        end
+        return outWriter:write(ptr, len)
     end
 
-    local function processDecrypted(chunk)
+    local function processDecrypted(ptr, len)
         -- Skip the first 16 bytes of the decrypted stream
         if skipRemaining > 0 then
-            if #chunk <= skipRemaining then
-                skipRemaining = skipRemaining - #chunk
+            if len <= skipRemaining then
+                skipRemaining = skipRemaining - len
                 return true
             end
-            chunk = chunk:sub(skipRemaining + 1)
+            ptr = ptr + skipRemaining
+            len = len - skipRemaining
             skipRemaining = 0
         end
 
         -- Flush previously held bytes (they're not the final block since more data arrived)
-        if #held > 0 then
-            local ok, err = writeThrough(held)
+        if heldLen > 0 then
+            local ok, err = writeThrough(held, heldLen)
             if not ok then return nil, err end
-            held = ""
+            heldLen = 0
         end
 
         -- Hold back the last 16 bytes of this chunk for PKCS7 stripping
-        if #chunk <= 16 then
-            held = chunk
+        if len <= 16 then
+            ffi.copy(held, ptr, len)
+            heldLen = len
             return true
         end
-        held = chunk:sub(-16)
-        local toWrite = chunk:sub(1, -17)
+        ffi.copy(held, ptr + len - 16, 16)
+        heldLen = 16
 
-        return writeThrough(toWrite)
+        return writeThrough(ptr, len - 16)
     end
 
     -- Read and process chunks
@@ -215,47 +283,31 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
         local chunk = inFile:read(CHUNK_SIZE)
         if not chunk then break end
 
-        local decrypted, updateErr = decryptor:update(chunk)
-        if not decrypted then
+        local ok, updateErr = decryptor:update_raw(chunk, processDecrypted)
+        if not ok then
             readErr = "decrypt update failed: " .. tostring(updateErr)
             break
-        end
-        if #decrypted > 0 then
-            local ok, procErr = processDecrypted(decrypted)
-            if not ok then
-                readErr = procErr
-                break
-            end
         end
     end
     inFile:close()
 
     if not readErr then
         -- Finalize decryption
-        local finalBytes, finErr = decryptor:finalize()
-        if not finalBytes then
+        local ok, finErr = decryptor:finalize_raw(processDecrypted)
+        if not ok then
             readErr = "decrypt finalize failed: " .. tostring(finErr)
-        elseif #finalBytes > 0 then
-            local ok, procErr = processDecrypted(finalBytes)
-            if not ok then readErr = procErr end
         end
     end
 
     if not readErr then
         -- Strip PKCS7 from held bytes and write remainder
-        local stripped, pkcsErr = stripPkcs7(held)
-        if not stripped then
+        local strippedLen, pkcsErr = stripPkcs7Held(held, heldLen)
+        if not strippedLen then
             readErr = "PKCS7 strip failed: " .. tostring(pkcsErr)
-        elseif #stripped > 0 then
-            if inflater then
-                local inflated, infErr = inflater:update(stripped)
-                if not inflated then
-                    readErr = "final inflate failed: " .. tostring(infErr)
-                elseif #inflated > 0 then
-                    outFile:write(inflated)
-                end
-            else
-                outFile:write(stripped)
+        elseif strippedLen > 0 then
+            local ok, err = writeThrough(held, strippedLen)
+            if not ok then
+                readErr = "final write failed: " .. tostring(err)
             end
         end
     end
@@ -263,7 +315,10 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
     if inflater then
         inflater:finalize()
     end
-    outFile:close()
+    local closeOk, closeErr = outWriter:close()
+    if not readErr and not closeOk then
+        readErr = "close failed: " .. tostring(closeErr)
+    end
 
     if readErr then
         os.remove(tmpPath)
@@ -346,16 +401,22 @@ local function repackEpub(workDir, outputPath)
     for _, relPath in ipairs(files) do
         if relPath ~= "mimetype" then
             local fullPath = workDir .. "/" .. relPath
-            local content = koutil.readFromFile(fullPath, "rb")
-            if not content then
+            if lfs.attributes(fullPath, "mode") ~= "file" then
                 writer:close()
                 return nil, "Missing repack input: " .. relPath
             end
-            if not writer:addFileFromMemory(relPath, content, mtime) then
+            local ok = writer:addPath(relPath, fullPath, false, mtime)
+            -- KOReader's Archiver.Writer:addPath() returns false when it stops on
+            -- ARCHIVE_EOF, even if the entry was written successfully. It only
+            -- populates writer.err on actual failures, so treat false/nil+no err
+            -- as success here.
+            if ok == false and writer.err == nil then
+                ok = true
+            end
+            if not ok then
                 writer:close()
                 return nil, writer.err or ("Could not write " .. relPath)
             end
-            content = nil
         end
     end
 
@@ -422,14 +483,24 @@ local function stripAdeptWatermarks(workDir)
     end
     local modifiedFiles = 0
     for _, relPath in ipairs(files) do
-        if relPath:match("%.x?html$") or relPath:match("%.xml$") then
+        local lowerRelPath = relPath:lower()
+        if lowerRelPath:match("%.xhtml$") or lowerRelPath:match("%.html$") or lowerRelPath:match("%.opf$") then
             local fullPath = workDir .. "/" .. relPath
-            local data = koutil.readFromFile(fullPath, "rb")
-            if data then
-                local updated, count = stripAdeptWatermarksFromText(data)
-                if count > 0 then
-                    assert(koutil.writeToFile(updated, fullPath))
-                    modifiedFiles = modifiedFiles + 1
+            local prefixFile = io.open(fullPath, "rb")
+            if prefixFile then
+                setLuaFileBuffer(prefixFile, WATERMARK_SCAN_BYTES)
+                local prefix = prefixFile:read(WATERMARK_SCAN_BYTES) or ""
+                prefixFile:close()
+
+                if prefix:find("Adept.resource", 1, true) or prefix:find("Adept.expected.resource", 1, true) then
+                    local data = koutil.readFromFile(fullPath, "rb")
+                    if data then
+                        local updated, count = stripAdeptWatermarksFromText(data)
+                        if count > 0 then
+                            assert(koutil.writeToFile(updated, fullPath))
+                            modifiedFiles = modifiedFiles + 1
+                        end
+                    end
                 end
             end
         end
