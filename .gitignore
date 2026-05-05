@@ -1,2 +1,5 @@
 build/
 .DS_Store
+.luajitrocks/
+.luarocks/
+dist/

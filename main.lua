@@ -23,6 +23,7 @@ local T = ffiUtil.template
 local adobe = require("adobe.adobe")
 local fulfillment = require("adobe.fulfillment")
 local naming = require("adobe.util.naming")
+local xml = require("adobe.util.xml")
 
 local ACSM = WidgetContainer:extend{
     name = "acsm",
@@ -161,25 +162,69 @@ function ACSM:isFileTypeSupported(file)
     return util.getFileNameSuffix(file):lower() == "acsm"
 end
 
+--- Parse metadata from an ACSM file.
+-- Extracts dc:title and resource UUID directly from the ACSM XML —
+-- no need to download the EPUB first.
+-- @string acsm_path path to the ACSM file
+-- @treturn table{ title, resourceId, identifier } or nil on failure
+function ACSM:parseAcsmeMetadata(acsm_path)
+    local content = io.open(acsm_path, "rb")
+    if not content then return nil end
+    local acsm_data = content:read("*a")
+    content:close()
+
+    local ok, parsed = pcall(xml.deserialize, acsm_data)
+    if not ok or not parsed then return nil end
+
+    local token = parsed.fulfillmentToken
+    if not token then return nil end
+
+    local rii = token.resourceItemInfo
+    if not rii then return nil end
+
+    local resource = rii.resource
+    local meta = rii.metadata
+
+    local title
+    if meta then
+        local raw = meta["dc:title"]
+        if type(raw) == "table" then
+            title = raw[1]
+        elseif type(raw) == "string" then
+            title = raw
+        end
+    end
+
+    local identifier
+    if meta then
+        local raw = meta["dc:identifier"]
+        if type(raw) == "table" then
+            identifier = raw[1]
+        elseif type(raw) == "string" then
+            identifier = raw
+        end
+    end
+
+    return {
+        title = title,
+        resourceId = resource, -- e.g. "urn:uuid:d976a1af-..."
+        identifier = identifier, -- e.g. ISBN
+    }
+end
+
 --- Build the output path for a fulfilled EPUB.
--- If an EPUB is provided, extract the title from its readable OPF metadata
--- (works before decryption for Adobe-encrypted EPUBs) and use that as the
--- filename. Otherwise fall back to the ACSM filename with .epub.
-function ACSM:deriveOutputPath(acsm_path, epub_path)
+-- Extracts title from the ACSM metadata (no EPUB download needed).
+-- Falls back to the ACSM filename with .epub extension.
+function ACSM:deriveOutputPath(acsm_path, acsm_meta)
     local dir = util.splitFilePathName(acsm_path)
     if dir == "" then dir = "./" end
 
-    -- Try to get a title-based name from the EPUB metadata.
-    -- Uses KOReader's native document API which reads OPF via crengine —
-    -- works on encrypted EPUBs without custom zip parsing.
-    if epub_path then
-        local title = self:extractTitleFromEpub(epub_path)
-        if title then
-            local safe = naming.sanitizeTitle(title)
-            if safe then
-                logger.info("[ACSM] deriveOutputPath: title=", title)
-                return dir .. safe .. ".epub"
-            end
+    -- Title from ACSM metadata (parsed before fulfillment)
+    if acsm_meta and acsm_meta.title then
+        local safe = naming.sanitizeTitle(acsm_meta.title)
+        if safe then
+            logger.info("[ACSM] deriveOutputPath: title=", acsm_meta.title)
+            return dir .. safe .. ".epub"
         end
     end
 
@@ -189,37 +234,6 @@ function ACSM:deriveOutputPath(acsm_path, epub_path)
         output_path = acsm_path .. ".epub"
     end
     return output_path
-end
-
---- Extract book title from an EPUB using KOReader's native document API.
--- Works on both plain and Adobe-encrypted EPUBs.
--- @string epub_path path to the EPUB file
--- @treturn string title, or nil on failure
-function ACSM:extractTitleFromEpub(epub_path)
-    local DocumentRegistry = require("document/documentregistry")
-    local ok, document = pcall(function()
-        return DocumentRegistry:openDocument(epub_path)
-    end)
-    if not ok or not document then
-        logger.warn("[ACSM] extractTitleFromEpub: failed to open document:", document)
-        return nil
-    end
-
-    local title
-    if document.loadDocument then
-        -- CreDocument: load only metadata, no rendering
-        if document:loadDocument(false) then
-            local props = document:getProps()
-            title = props and props.title or nil
-        end
-    else
-        local props = document:getProps()
-        title = props and props.title or nil
-    end
-    document:close()
-
-    logger.dbg("[ACSM] extractTitleFromEpub:", title or "(nil)")
-    return title
 end
 
 --- Find a unique output path, avoiding overwrites.
@@ -246,6 +260,33 @@ function ACSM:findUniquePath(path)
     -- Extremely unlikely, but fall back to original path
     logger.warn("[ACSM] Could not find unique path after 999 attempts")
     return path
+end
+
+--- Get the path to the fulfillment mapping file.
+-- Stores resource_id → output_path mappings for reuse detection.
+function ACSM:getFulfillmentMapPath()
+    local cache_dir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
+    return cache_dir .. "/fulfillment_map.lua"
+end
+
+--- Look up a previously fulfilled EPUB by resource ID.
+-- @string resource_id the ACSM resource UUID (e.g. "urn:uuid:...")
+-- @treturn string output path, or nil
+function ACSM:lookupFulfillmentMapping(resource_id)
+    local map_path = self:getFulfillmentMapPath()
+    local map = LuaSettings:open(map_path)
+    return map:readSetting(resource_id)
+end
+
+--- Store a resource_id → output_path mapping after fulfillment.
+-- @string resource_id the ACSM resource UUID
+-- @string output_path where the EPUB was saved
+function ACSM:saveFulfillmentMapping(resource_id, output_path)
+    local map_path = self:getFulfillmentMapPath()
+    local map = LuaSettings:open(map_path)
+    map:saveSetting(resource_id, output_path)
+    map:flush()
+    logger.info("[ACSM] Saved fulfillment mapping:", resource_id, "→", output_path)
 end
 
 function ACSM:clearActivation()
@@ -329,27 +370,24 @@ function ACSM:openGeneratedBook(path)
     end
 end
 
-function ACSM:fulfillLoan(acsm_path)
+function ACSM:fulfillLoan(acsm_path, acsm_meta)
     logger.info("[ACSM] fulfillLoan: acsm_path=", acsm_path)
     local activation, reused = self:getActivation(false)
 
-    local output_path_resolver = function(encrypted_epub_path)
-        -- The EPUB OPF metadata remains readable before decryption, so choose
-        -- the final output filename now and decrypt directly there.
-        local desired_path = self:deriveOutputPath(acsm_path, encrypted_epub_path)
-        return self:findUniquePath(desired_path)
-    end
+    -- Title-based output path derived from ACSM metadata (not EPUB)
+    local desired_path = self:deriveOutputPath(acsm_path, acsm_meta)
+    local output_path = self:findUniquePath(desired_path)
+    logger.info("[ACSM] fulfillLoan: output_path=", output_path)
 
     Trapper:info(_("Downloading book..."), false, true)
     logger.info("[ACSM] fulfillLoan: starting fulfillment.process...")
     local result, err = fulfillment.process(
         acsm_path,
-        nil,
+        output_path,
         activation.creds,
         activation.deviceUUID,
         activation.fingerprint,
-        activation.authCert,
-        output_path_resolver
+        activation.authCert
     )
 
     if not result and reused and isActivationError(err) then
@@ -359,17 +397,21 @@ function ACSM:fulfillLoan(acsm_path)
         Trapper:info(_("Retrying with new activation..."), false, true)
         result, err = fulfillment.process(
             acsm_path,
-            nil,
+            output_path,
             activation.creds,
             activation.deviceUUID,
             activation.fingerprint,
-            activation.authCert,
-            output_path_resolver
+            activation.authCert
         )
     end
 
     if not result then
         return nil, err
+    end
+
+    -- Store resource → output mapping for reuse detection
+    if acsm_meta and acsm_meta.resourceId then
+        self:saveFulfillmentMapping(acsm_meta.resourceId, output_path)
     end
 
     return result
@@ -382,12 +424,15 @@ function ACSM:openFile(file)
 
     self:loadSettings()
 
-    -- For "reuse existing", only the simple fallback name is knowable before
-    -- fulfillment/download. Title-based reuse is handled by collision-free naming.
-    if self.reuse_existing then
-        local fallback_path = self:deriveOutputPath(file, nil)
-        if util.pathExists(fallback_path) then
-            self:openGeneratedBook(fallback_path)
+    -- Parse ACSM metadata for title and resource ID
+    local acsm_meta = self:parseAcsmeMetadata(file)
+
+    -- For "reuse existing", look up the previous output path by resource ID
+    if self.reuse_existing and acsm_meta and acsm_meta.resourceId then
+        local existing_path = self:lookupFulfillmentMapping(acsm_meta.resourceId)
+        if existing_path and util.pathExists(existing_path) then
+            logger.info("[ACSM] Reusing existing EPUB:", existing_path)
+            self:openGeneratedBook(existing_path)
             return
         end
     end
@@ -398,7 +443,7 @@ function ACSM:openFile(file)
 
     Trapper:wrap(function()
         Trapper:info(_("Preparing loan..."), false, true)
-        local result, fulfill_err = self:fulfillLoan(file)
+        local result, fulfill_err = self:fulfillLoan(file, acsm_meta)
         if not result then
             logger.warn("[ACSM] Processing failed:", fulfill_err)
             Trapper:reset()

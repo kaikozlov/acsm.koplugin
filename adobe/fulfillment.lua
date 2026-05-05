@@ -372,7 +372,7 @@ function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
     return true
 end
 
-function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprint, authCert, outputPathResolver)
+function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprint, authCert)
     outputPath = outputPath or acsmPath:gsub("%.acsm$", ".epub")
     logger.info("[ACSM] fulfillment.process: acsmPath=", acsmPath, "outputPath=", outputPath)
 
@@ -435,16 +435,6 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
         return nil, downloadErr
     end
     logger.info("[ACSM] fulfillment.process: download complete")
-
-    if outputPathResolver then
-        local resolvedPath, resolveErr = outputPathResolver(tmpEpub)
-        if not resolvedPath then
-            os.remove(tmpEpub)
-            return nil, "Failed to choose output path: " .. tostring(resolveErr)
-        end
-        outputPath = resolvedPath
-        logger.info("[ACSM] fulfillment.process: resolved output path=", outputPath)
-    end
 
     logger.info("[ACSM] fulfillment.process: decrypting book key...")
     local bookKey, bookKeyErr = fulfillment.decryptBookKey(result.encryptedKey, creds.licenseKey)
