@@ -30,11 +30,16 @@ local function uniqueCachePath(prefix, suffix)
     koutil.makePath(cacheDir)
     for i = 1, 999 do
         local path = cacheDir .. "/" .. prefix .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999)) .. suffix
-        if not lfs.attributes(path, "mode") then
+        local f, err = io.open(path, "wx")
+        if f then
+            f:close()
             return path
         end
     end
-    return cacheDir .. "/" .. prefix .. "-" .. tostring(os.time()) .. suffix
+    local fallback = cacheDir .. "/" .. prefix .. "-" .. tostring(os.time()) .. suffix
+    local f = io.open(fallback, "w")
+    if f then f:close() end
+    return fallback
 end
 
 local function requestToString(request)

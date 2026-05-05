@@ -67,9 +67,20 @@ function naming.sanitizeTitle(title)
     -- Trim leading/trailing whitespace and dots (dots at start are hidden files on unix)
     safe = safe:match("^[%.%s]*(.-)[%.%s]*$")
 
-    -- Limit length to 200 chars (generous but avoids filesystem limits)
+    -- Limit length to 200 bytes but avoid splitting a multi-byte UTF-8 sequence
     if #safe > 200 then
-        safe = safe:sub(1, 200):match("^(.-)%s*$")
+        safe = safe:sub(1, 200)
+        -- A trailing continuation byte (10xxxxxx) means we split a multi-byte char.
+        -- Remove bytes until the leading byte is gone too.
+        while #safe > 0 and safe:byte(#safe) >= 0x80 and safe:byte(#safe) <= 0xBF do
+            safe = safe:sub(1, #safe - 1)
+        end
+        -- If the last byte is now a multi-byte lead byte (11xxxxxx) with no
+        -- continuation bytes following it, remove that too.
+        if #safe > 0 and safe:byte(#safe) >= 0xC0 then
+            safe = safe:sub(1, #safe - 1)
+        end
+        safe = safe:match("^(.-)%s*$")
     end
 
     if safe == "" then

@@ -167,7 +167,7 @@ end
 -- no need to download the EPUB first.
 -- @string acsm_path path to the ACSM file
 -- @treturn table{ title, resourceId, identifier } or nil on failure
-function ACSM:parseAcsmeMetadata(acsm_path)
+function ACSM:parseAcsmMetadata(acsm_path)
     local content = io.open(acsm_path, "rb")
     if not content then return nil end
     local acsm_data = content:read("*a")
@@ -425,7 +425,7 @@ function ACSM:openFile(file)
     self:loadSettings()
 
     -- Parse ACSM metadata for title and resource ID
-    local acsm_meta = self:parseAcsmeMetadata(file)
+    local acsm_meta = self:parseAcsmMetadata(file)
 
     -- For "reuse existing", look up the previous output path by resource ID
     if self.reuse_existing and acsm_meta and acsm_meta.resourceId then
