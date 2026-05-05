@@ -24,6 +24,19 @@ local ASN_END_TAG = 3
 local ASN_TEXT = 4
 local ASN_ATTRIBUTE = 5
 
+local function uniqueCachePath(prefix, suffix)
+    local cacheDir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
+    logger.info("[ACSM] fulfillment.process: ensuring cache dir=", cacheDir)
+    koutil.makePath(cacheDir)
+    for i = 1, 999 do
+        local path = cacheDir .. "/" .. prefix .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999)) .. suffix
+        if not lfs.attributes(path, "mode") then
+            return path
+        end
+    end
+    return cacheDir .. "/" .. prefix .. "-" .. tostring(os.time()) .. suffix
+end
+
 local function requestToString(request)
     local sink, resp = socketutil.table_sink({})
     request.sink = sink
@@ -359,7 +372,7 @@ function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
     return true
 end
 
-function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprint, authCert)
+function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprint, authCert, outputPathResolver)
     outputPath = outputPath or acsmPath:gsub("%.acsm$", ".epub")
     logger.info("[ACSM] fulfillment.process: acsmPath=", acsmPath, "outputPath=", outputPath)
 
@@ -414,17 +427,31 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     if err then return nil, err end
     logger.info("[ACSM] fulfillment.process: fulfillment OK, download URL=", result.src)
 
-    local cacheDir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
-    logger.info("[ACSM] fulfillment.process: ensuring cache dir=", cacheDir)
-    koutil.makePath(cacheDir)
-    local tmpEpub = cacheDir .. "/fulfillment.epub"
+    local tmpEpub = uniqueCachePath("fulfillment", ".epub")
     logger.info("[ACSM] fulfillment.process: downloading book to", tmpEpub)
     local _, downloadErr = fulfillment.downloadBook(result.src, tmpEpub)
-    if downloadErr then return nil, downloadErr end
-    logger.info("[ACSM] fulfillment.process: download complete, decrypting book key...")
+    if downloadErr then
+        os.remove(tmpEpub)
+        return nil, downloadErr
+    end
+    logger.info("[ACSM] fulfillment.process: download complete")
 
+    if outputPathResolver then
+        local resolvedPath, resolveErr = outputPathResolver(tmpEpub)
+        if not resolvedPath then
+            os.remove(tmpEpub)
+            return nil, "Failed to choose output path: " .. tostring(resolveErr)
+        end
+        outputPath = resolvedPath
+        logger.info("[ACSM] fulfillment.process: resolved output path=", outputPath)
+    end
+
+    logger.info("[ACSM] fulfillment.process: decrypting book key...")
     local bookKey, bookKeyErr = fulfillment.decryptBookKey(result.encryptedKey, creds.licenseKey)
-    if not bookKey then return nil, "Failed to decrypt book key: " .. bookKeyErr end
+    if not bookKey then
+        os.remove(tmpEpub)
+        return nil, "Failed to decrypt book key: " .. bookKeyErr
+    end
     logger.info("[ACSM] fulfillment.process: book key decrypted, decrypting EPUB...")
 
     local decryptedInfo, decryptErr = epub.decryptAdobeEpub(tmpEpub, outputPath, bookKey)

@@ -21,6 +21,7 @@ local _ = require("gettext")
 local T = ffiUtil.template
 
 local adobe = require("adobe.adobe")
+local epub = require("adobe.epub")
 local fulfillment = require("adobe.fulfillment")
 
 local ACSM = WidgetContainer:extend{
@@ -160,12 +161,55 @@ function ACSM:isFileTypeSupported(file)
     return util.getFileNameSuffix(file):lower() == "acsm"
 end
 
-function ACSM:deriveOutputPath(acsm_path)
+--- Build the output path for a fulfilled EPUB.
+-- If an EPUB is provided, extract the title from its readable OPF metadata
+-- (works before decryption for Adobe-encrypted EPUBs) and use that as the
+-- filename. Otherwise fall back to the ACSM filename with .epub.
+function ACSM:deriveOutputPath(acsm_path, epub_path)
+    local dir = util.splitFilePathName(acsm_path)
+    if dir == "" then dir = "./" end
+
+    -- Try to get a title-based name from the EPUB metadata
+    if epub_path then
+        local title = epub.extractTitle(epub_path)
+        local safe = epub.sanitizeTitle(title)
+        if safe then
+            return dir .. safe .. ".epub"
+        end
+    end
+
+    -- Fallback: swap .acsm -> .epub
     local output_path = acsm_path:gsub("%.[Aa][Cc][Ss][Mm]$", ".epub")
     if output_path == acsm_path then
         output_path = acsm_path .. ".epub"
     end
     return output_path
+end
+
+--- Find a unique output path, avoiding overwrites.
+-- If the target path does not exist, returns it as-is.
+-- Otherwise appends a counter: "Book (1).epub", "Book (2).epub", etc.
+-- @string path desired output path
+-- @treturn string unique path to use
+function ACSM:findUniquePath(path)
+    if not util.pathExists(path) then
+        return path
+    end
+
+    local dir, filename = util.splitFilePathName(path)
+    local name, ext = util.splitFileNameSuffix(filename)
+    if ext ~= "" then ext = "." .. ext end
+
+    for i = 1, 999 do
+        local candidate = dir .. name .. " (" .. i .. ")" .. ext
+        if not util.pathExists(candidate) then
+            return candidate
+        end
+    end
+
+    -- Extremely unlikely, but fall back to original path
+    logger.warn("[ACSM] Could not find unique path after 999 attempts")
+    return path
 end
 
 function ACSM:clearActivation()
@@ -249,19 +293,27 @@ function ACSM:openGeneratedBook(path)
     end
 end
 
-function ACSM:fulfillLoan(acsm_path, output_path)
-    logger.info("[ACSM] fulfillLoan: acsm_path=", acsm_path, "output_path=", output_path)
+function ACSM:fulfillLoan(acsm_path)
+    logger.info("[ACSM] fulfillLoan: acsm_path=", acsm_path)
     local activation, reused = self:getActivation(false)
+
+    local output_path_resolver = function(encrypted_epub_path)
+        -- The EPUB OPF metadata remains readable before decryption, so choose
+        -- the final output filename now and decrypt directly there.
+        local desired_path = self:deriveOutputPath(acsm_path, encrypted_epub_path)
+        return self:findUniquePath(desired_path)
+    end
 
     Trapper:info(_("Downloading book..."), false, true)
     logger.info("[ACSM] fulfillLoan: starting fulfillment.process...")
     local result, err = fulfillment.process(
         acsm_path,
-        output_path,
+        nil,
         activation.creds,
         activation.deviceUUID,
         activation.fingerprint,
-        activation.authCert
+        activation.authCert,
+        output_path_resolver
     )
 
     if not result and reused and isActivationError(err) then
@@ -271,11 +323,12 @@ function ACSM:fulfillLoan(acsm_path, output_path)
         Trapper:info(_("Retrying with new activation..."), false, true)
         result, err = fulfillment.process(
             acsm_path,
-            output_path,
+            nil,
             activation.creds,
             activation.deviceUUID,
             activation.fingerprint,
-            activation.authCert
+            activation.authCert,
+            output_path_resolver
         )
     end
 
@@ -292,11 +345,15 @@ function ACSM:openFile(file)
     end
 
     self:loadSettings()
-    local output_path = self:deriveOutputPath(file)
 
-    if self.reuse_existing and util.pathExists(output_path) then
-        self:openGeneratedBook(output_path)
-        return
+    -- For "reuse existing", only the simple fallback name is knowable before
+    -- fulfillment/download. Title-based reuse is handled by collision-free naming.
+    if self.reuse_existing then
+        local fallback_path = self:deriveOutputPath(file, nil)
+        if util.pathExists(fallback_path) then
+            self:openGeneratedBook(fallback_path)
+            return
+        end
     end
 
     if NetworkMgr:willRerunWhenOnline(function() self:openFile(file) end) then
@@ -305,7 +362,7 @@ function ACSM:openFile(file)
 
     Trapper:wrap(function()
         Trapper:info(_("Preparing loan..."), false, true)
-        local result, fulfill_err = self:fulfillLoan(file, output_path)
+        local result, fulfill_err = self:fulfillLoan(file)
         if not result then
             logger.warn("[ACSM] Processing failed:", fulfill_err)
             Trapper:reset()
@@ -320,6 +377,7 @@ function ACSM:openFile(file)
         end
 
         Trapper:clear()
+
         if self.open_after_download then
             UIManager:nextTick(function()
                 self:openGeneratedBook(result.outputPath)

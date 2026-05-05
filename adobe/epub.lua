@@ -8,6 +8,7 @@ local logger = require("logger")
 local koutil = require("util")
 
 local dom = require("adobe.util.dom")
+local naming = require("adobe.util.naming")
 local nativecrypto = require("adobe.util.nativecrypto")
 local zlib = require("adobe.util.zlib")
 
@@ -463,6 +464,17 @@ local function stripAdeptWatermarks(workDir)
 
     return modifiedFiles
 end
+
+--- Extract the dc:title from an EPUB file using KOReader's Archiver.
+-- Convenience wrapper around naming.extractTitle.
+function epub.extractTitle(epubPath)
+    local reader = Archiver.Reader:new()
+    return naming.extractTitle(reader, epubPath)
+end
+
+--- Sanitize a book title into a safe filename.
+-- Delegates to naming.sanitizeTitle.
+epub.sanitizeTitle = naming.sanitizeTitle
 
 function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
     logger.info("[ACSM] decryptAdobeEpub: input=", inputPath, "output=", outputPath)
