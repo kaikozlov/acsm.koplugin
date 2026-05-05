@@ -237,22 +237,30 @@ function ACSM:deriveOutputPath(acsm_path, acsm_meta)
 end
 
 --- Find a unique output path, avoiding overwrites.
--- If the target path does not exist, returns it as-is.
+-- Uses atomic exclusive file creation (io.open "wx") to avoid TOCTOU races.
+-- Creates a placeholder file to reserve the name, which the caller should
+-- overwrite. If the target path does not exist, returns it as-is.
 -- Otherwise appends a counter: "Book (1).epub", "Book (2).epub", etc.
 -- @string path desired output path
 -- @treturn string unique path to use
 function ACSM:findUniquePath(path)
-    if not util.pathExists(path) then
+    -- Try the base path first with atomic exclusive create
+    local f = io.open(path, "wx")
+    if f then
+        f:close()
         return path
     end
 
+    -- Path exists; try numbered variants atomically
     local dir, filename = util.splitFilePathName(path)
     local name, ext = util.splitFileNameSuffix(filename)
     if ext ~= "" then ext = "." .. ext end
 
     for i = 1, 999 do
         local candidate = dir .. name .. " (" .. i .. ")" .. ext
-        if not util.pathExists(candidate) then
+        local cf = io.open(candidate, "wx")
+        if cf then
+            cf:close()
             return candidate
         end
     end
@@ -265,25 +273,32 @@ end
 --- Get the path to the fulfillment mapping file.
 -- Stores resource_id → output_path mappings for reuse detection.
 function ACSM:getFulfillmentMapPath()
-    local cache_dir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
-    return cache_dir .. "/fulfillment_map.lua"
+    return DataStorage:getDataDir() .. "/cache/acsm.koplugin/fulfillment_map.lua"
+end
+
+--- Get or create the cached fulfillment mapping.
+-- Caches the LuaSettings object to avoid re-parsing the file on every lookup.
+-- @treturn LuaSettings
+function ACSM:getFulfillmentMap()
+    if not self._fulfillment_map then
+        local map_path = self:getFulfillmentMapPath()
+        self._fulfillment_map = LuaSettings:open(map_path)
+    end
+    return self._fulfillment_map
 end
 
 --- Look up a previously fulfilled EPUB by resource ID.
 -- @string resource_id the ACSM resource UUID (e.g. "urn:uuid:...")
 -- @treturn string output path, or nil
 function ACSM:lookupFulfillmentMapping(resource_id)
-    local map_path = self:getFulfillmentMapPath()
-    local map = LuaSettings:open(map_path)
-    return map:readSetting(resource_id)
+    return self:getFulfillmentMap():readSetting(resource_id)
 end
 
 --- Store a resource_id → output_path mapping after fulfillment.
 -- @string resource_id the ACSM resource UUID
 -- @string output_path where the EPUB was saved
 function ACSM:saveFulfillmentMapping(resource_id, output_path)
-    local map_path = self:getFulfillmentMapPath()
-    local map = LuaSettings:open(map_path)
+    local map = self:getFulfillmentMap()
     map:saveSetting(resource_id, output_path)
     map:flush()
     logger.info("[ACSM] Saved fulfillment mapping:", resource_id, "→", output_path)
