@@ -5,9 +5,12 @@
 # luassert, say, mediator, cliargs, dkjson, penlight, term) so we never
 # touch luarocks at runtime.
 #
+# The image only contains the slow-to-install stuff (Ubuntu packages,
+# KOReader release, busted wrapper). Plugin source is mounted at runtime
+# via `docker run -v`, so you never need to rebuild just because code changed.
+#
 # Usage:
-#   make docker-test
-#   make docker-shell
+#   make docker-test     (builds image if needed, then runs tests)
 
 ARG KOREADER_VERSION=v2026.03
 # Architecture: x86_64 (Intel/AMD) or arm64 (Apple Silicon / Graviton)
@@ -57,13 +60,11 @@ RUN printf '#!/bin/sh\nexec %s /usr/bin/busted "$@"\n' "${KOREADER_DIR}/luajit" 
     # Sanity check: busted reports its version
     cd "${KOREADER_DIR}" && /usr/local/bin/busted-koreader --version
 
-# Copy plugin source and symlink into KOReader's plugin directory
-WORKDIR /opt/acsm.koplugin
-COPY . /opt/acsm.koplugin/
+# Create the symlink mount point. The Makefile mounts plugin source here
+# at runtime via `docker run -v`. This keeps the image stable — no rebuilds
+# needed when plugin code changes.
 RUN ln -sf /opt/acsm.koplugin /opt/lib/koreader/plugins/acsm.koplugin
 
-# Tests must be run from inside KOReader's directory so relative `require()`
-# paths (e.g. `require("ffi/loadlib")`) resolve correctly.
 WORKDIR /opt/lib/koreader
 
 CMD ["busted-koreader", "--verbose", \
