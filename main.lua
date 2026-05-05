@@ -21,8 +21,8 @@ local _ = require("gettext")
 local T = ffiUtil.template
 
 local adobe = require("adobe.adobe")
-local epub = require("adobe.epub")
 local fulfillment = require("adobe.fulfillment")
+local naming = require("adobe.util.naming")
 
 local ACSM = WidgetContainer:extend{
     name = "acsm",
@@ -169,19 +169,17 @@ function ACSM:deriveOutputPath(acsm_path, epub_path)
     local dir = util.splitFilePathName(acsm_path)
     if dir == "" then dir = "./" end
 
-    -- Try to get a title-based name from the EPUB metadata
+    -- Try to get a title-based name from the EPUB metadata.
+    -- Uses KOReader's native document API which reads OPF via crengine —
+    -- works on encrypted EPUBs without custom zip parsing.
     if epub_path then
-        local title, err = epub.extractTitle(epub_path)
+        local title = self:extractTitleFromEpub(epub_path)
         if title then
-            local safe = epub.sanitizeTitle(title)
+            local safe = naming.sanitizeTitle(title)
             if safe then
-                logger.info("[ACSM] deriveOutputPath: title=", title, "safe=", safe)
+                logger.info("[ACSM] deriveOutputPath: title=", title)
                 return dir .. safe .. ".epub"
-            else
-                logger.warn("[ACSM] deriveOutputPath: sanitizeTitle returned nil for", title)
             end
-        else
-            logger.warn("[ACSM] deriveOutputPath: extractTitle failed:", err, "path=", epub_path)
         end
     end
 
@@ -191,6 +189,37 @@ function ACSM:deriveOutputPath(acsm_path, epub_path)
         output_path = acsm_path .. ".epub"
     end
     return output_path
+end
+
+--- Extract book title from an EPUB using KOReader's native document API.
+-- Works on both plain and Adobe-encrypted EPUBs.
+-- @string epub_path path to the EPUB file
+-- @treturn string title, or nil on failure
+function ACSM:extractTitleFromEpub(epub_path)
+    local DocumentRegistry = require("document/documentregistry")
+    local ok, document = pcall(function()
+        return DocumentRegistry:openDocument(epub_path)
+    end)
+    if not ok or not document then
+        logger.warn("[ACSM] extractTitleFromEpub: failed to open document:", document)
+        return nil
+    end
+
+    local title
+    if document.loadDocument then
+        -- CreDocument: load only metadata, no rendering
+        if document:loadDocument(false) then
+            local props = document:getProps()
+            title = props and props.title or nil
+        end
+    else
+        local props = document:getProps()
+        title = props and props.title or nil
+    end
+    document:close()
+
+    logger.dbg("[ACSM] extractTitleFromEpub:", title or "(nil)")
+    return title
 end
 
 --- Find a unique output path, avoiding overwrites.
