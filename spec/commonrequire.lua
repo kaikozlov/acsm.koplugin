@@ -149,6 +149,9 @@ package.path = plugin_path .. "/?.lua;" ..
                plugin_path .. "/dependencies/?.lua;" ..
                package.path
 
+-- Export TEST_DATA_DIR for specs that need scratch space
+_G.TEST_DATA_DIR = test_data_dir -- luacheck: ignore
+
 print(string.format("[commonrequire] KOReader %s (headless)  Device: %s  Screen: %dx%d",
     require("version"):getCurrentRevision(),
     tostring(Device.model),

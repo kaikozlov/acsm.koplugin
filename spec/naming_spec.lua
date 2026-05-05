@@ -1,25 +1,5 @@
-require("busted.runner")()
-
-local lfs = require("lfs")
-
--- Resolve plugin root to an absolute path so tests work from any cwd
-local this_file = debug.getinfo(1, "S").source:match("@?(.*)") or "."
-local this_dir = this_file:match("(.*)/") or "."
--- Go up from spec/ to the project root
-local plugin_root
-if this_dir:match("/spec$") or this_dir == "spec" then
-    plugin_root = this_dir:match("^(.*)/spec$") or "."
-else
-    plugin_root = this_dir
-end
--- Make absolute
-if plugin_root:sub(1,1) ~= "/" then
-    plugin_root = lfs.currentdir() .. "/" .. plugin_root
-end
-
-package.path = plugin_root .. "/?.lua;" .. package.path
-
 local naming = require("adobe.util.naming")
+
 
 -- ---------------------------------------------------------------------------
 -- Helpers

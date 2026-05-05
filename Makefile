@@ -1,13 +1,14 @@
 # Makefile for acsm.koplugin
-# Two-tier test system:
-#   1. Unit specs (spec/*_spec.lua) — fast, mocked, runs locally with busted+luajit
-#   2. Integration specs (spec/integration/) — real KOReader, runs in Docker
+# All tests run inside Docker with KOReader's real LuaJIT + native libs.
 #
 # Usage:
-#   make test            — run unit tests locally (requires luajit + busted)
-#   make docker-test     — run integration tests in Docker (requires Docker)
+#   make test            — run all tests in Docker (excludes e2e/network tests)
+#   make test-e2e        — run E2E tests (requires network — hits real Adobe servers)
+#   make test-all        — run everything including e2e
+#   make test-filter     — run tests matching FILTER pattern (pass FILTER="...")
 #   make docker-build    — build the Docker test image
 #   make docker-shell    — shell into the Docker test container
+#   make lint            — run luacheck locally
 
 KOREADER_VERSION ?= v2026.03
 # Auto-detect architecture: arm64 on Apple Silicon, x86_64 everywhere else
@@ -15,57 +16,62 @@ DOCKER_ARCH ?= $(shell uname -m | sed 's/arm64/aarch64/' | grep -q aarch64 && ec
 IMAGE_NAME ?= acsm-test
 PLUGIN_DIR := $(shell pwd)
 
-.PHONY: help test lint docker-build docker-test docker-test-e2e docker-test-filter docker-shell docker-busted clean
+.PHONY: help test test-e2e test-all test-filter lint docker-build docker-shell clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 # ---------------------------------------------------------------------------
-# Local tests (fast, mocked — no Docker needed)
+# Docker image (cached — only rebuilds when KOReader version changes)
 # ---------------------------------------------------------------------------
 
-test: ## Run unit specs locally (requires luajit + busted)
-	busted --verbose --pattern=_spec spec/
-
-lint: ## Run luacheck
-	luacheck .
-
-# ---------------------------------------------------------------------------
-# Docker tests (real KOReader environment)
-# The image only contains the heavy stuff (Ubuntu packages, KOReader binary,
-# busted). Plugin source is bind-mounted at runtime so code changes never
-# trigger a rebuild.
-# ---------------------------------------------------------------------------
-
-docker-build: ## Build the Docker test image (cached unless KOReader version changes)
+docker-build: ## Build the Docker test image
 	docker build \
 		--build-arg KOREADER_VERSION=$(KOREADER_VERSION) \
 		--build-arg ARCH=$(DOCKER_ARCH) \
 		-t $(IMAGE_NAME) .
 
-docker-test: docker-build ## Run integration tests (mounts plugin source, no rebuild needed)
-	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME)
+# ---------------------------------------------------------------------------
+# Tests — all run inside Docker with real KOReader
+# ---------------------------------------------------------------------------
 
-docker-shell: docker-build ## Drop into a shell in the test container
-	docker run --rm -it -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) /bin/bash
+test: docker-build ## Run all tests (excludes e2e network tests)
+	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
+		busted-koreader --verbose \
+		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
+		--exclude-tags=e2e \
+		/opt/acsm.koplugin/spec/
 
-docker-busted: docker-build ## Run busted with custom args (pass ARGS="...")
-	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) busted-koreader $(ARGS)
-
-docker-test-e2e: docker-build ## Run E2E tests (requires network — downloads real ACSM from Adobe)
+test-e2e: docker-build ## Run E2E tests only (requires network — downloads real ACSM from Adobe)
 	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
 		busted-koreader --verbose \
 		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
 		--filter=e2e \
-		/opt/acsm.koplugin/spec/integration/
+		/opt/acsm.koplugin/spec/
 
-docker-test-filter: docker-build ## Run tests matching FILTER pattern (pass FILTER="...")
+test-all: docker-build ## Run all tests including e2e
+	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
+		busted-koreader --verbose \
+		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
+		/opt/acsm.koplugin/spec/
+
+test-filter: docker-build ## Run tests matching FILTER pattern (pass FILTER="...")
 	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
 		busted-koreader --verbose \
 		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
 		--filter="$(FILTER)" \
-		/opt/acsm.koplugin/spec/integration/
+		/opt/acsm.koplugin/spec/
+
+docker-shell: docker-build ## Drop into a shell in the test container
+	docker run --rm -it -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) /bin/bash
+
+# ---------------------------------------------------------------------------
+# Local tools (no Docker needed)
+# ---------------------------------------------------------------------------
+
+lint: ## Run luacheck
+	luacheck .
 
 # ---------------------------------------------------------------------------
 # Cleanup
