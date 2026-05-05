@@ -171,10 +171,17 @@ function ACSM:deriveOutputPath(acsm_path, epub_path)
 
     -- Try to get a title-based name from the EPUB metadata
     if epub_path then
-        local title = epub.extractTitle(epub_path)
-        local safe = epub.sanitizeTitle(title)
-        if safe then
-            return dir .. safe .. ".epub"
+        local title, err = epub.extractTitle(epub_path)
+        if title then
+            local safe = epub.sanitizeTitle(title)
+            if safe then
+                logger.info("[ACSM] deriveOutputPath: title=", title, "safe=", safe)
+                return dir .. safe .. ".epub"
+            else
+                logger.warn("[ACSM] deriveOutputPath: sanitizeTitle returned nil for", title)
+            end
+        else
+            logger.warn("[ACSM] deriveOutputPath: extractTitle failed:", err, "path=", epub_path)
         end
     end
 

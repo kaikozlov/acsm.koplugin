@@ -465,11 +465,48 @@ local function stripAdeptWatermarks(workDir)
     return modifiedFiles
 end
 
---- Extract the dc:title from an EPUB file using KOReader's Archiver.
--- Convenience wrapper around naming.extractTitle.
 function epub.extractTitle(epubPath)
     local reader = Archiver.Reader:new()
-    return naming.extractTitle(reader, epubPath)
+    if not reader:open(epubPath) then
+        logger.warn("[ACSM] extractTitle: Archiver failed to open:", epubPath, reader.err)
+        return nil, reader.err or "Could not open EPUB"
+    end
+
+    local containerXml = reader:extractToMemory("META-INF/container.xml")
+    if not containerXml then
+        reader:close()
+        logger.warn("[ACSM] extractTitle: failed to read META-INF/container.xml from", epubPath, reader.err)
+        return nil, "Missing META-INF/container.xml"
+    end
+
+    local opfPath = containerXml:match('full%-path="([^"]+)"')
+    if not opfPath then
+        reader:close()
+        logger.warn("[ACSM] extractTitle: no rootfile full-path in container.xml")
+        return nil, "No rootfile in container.xml"
+    end
+    logger.dbg("[ACSM] extractTitle: opfPath=", opfPath)
+
+    local opfXml = reader:extractToMemory(opfPath)
+    reader:close()
+    if not opfXml then
+        logger.warn("[ACSM] extractTitle: failed to read OPF:", opfPath, "from", epubPath)
+        return nil, "Could not read OPF: " .. opfPath
+    end
+
+    local title = opfXml:match("<dc:title[^>]*>([^<]+)</dc:title>")
+    if not title then
+        logger.warn("[ACSM] extractTitle: no dc:title found in OPF")
+        return nil, "No dc:title in OPF metadata"
+    end
+
+    title = title:match("^%s*(.-)%s*$")
+    if title == "" then
+        return nil, "Empty dc:title"
+    end
+
+    logger.info("[ACSM] extractTitle:", title)
+    return title
 end
 
 --- Sanitize a book title into a safe filename.
