@@ -1,0 +1,13 @@
+REFERENCE/
+.git/
+.github/
+.devenv/
+.envrc
+*.md
+docs/
+build/
+.luarocks/
+.luajitrocks/
+node_modules/
+test/headless*
+test-results.xml
