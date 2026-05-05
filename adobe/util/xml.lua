@@ -33,8 +33,8 @@ function xml.addNamespace(tb, prefix, namespace)
 end
 
 -- serialize a table into an XML string
-function xml.serialize(table, name)
-    local name = name or ""
+function xml.serialize(table, rootName)
+    local name = rootName or ""
     return xml2lua.toXml(table, name)
 end
 

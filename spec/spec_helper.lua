@@ -100,7 +100,7 @@ package.preload["util"] = function()
     function util.splitFilePathName(file)
         if file == nil or file == "" then return "", "" end
         if not file:find("/") then return "", file end
-        return file:match("(.*/)(.*)") 
+        return file:match("(.*/)(.*)")
     end
 
     return util

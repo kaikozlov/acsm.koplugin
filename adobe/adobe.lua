@@ -13,7 +13,7 @@ local crypto = require("adobe.util.crypto")
 local xml = require("adobe.util.xml")
 local base64 = require("adobe.util.util").base64
 
--- Eden2 activation service 
+-- Eden2 activation service
 adobe.EDEN_URL = url.parse("https://adeactivate.adobe.com/adept")
 
 adobe.VERSIONS = {
@@ -175,14 +175,14 @@ function adobe.signIn(method, username, password, authCert)
         licenseKey = lk
     end
 
-    return { 
+    return {
         -- generated
-        deviceKey = deviceKey, 
-        authKey = authKey, 
+        deviceKey = deviceKey,
+        authKey = authKey,
         licenseKey = licenseKey,
-        -- received 
-        licenseCert = resp.credentials.licenseCertificate, 
-        user = resp.credentials.user, 
+        -- received
+        licenseCert = resp.credentials.licenseCertificate,
+        user = resp.credentials.user,
         username = resp.credentials.username[1],
         pkcs12 = resp.credentials.pkcs12
     }

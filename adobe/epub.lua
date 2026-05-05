@@ -489,12 +489,11 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
     local decryptCount = 0
     for relPath in pairs(parsed.encrypted) do
         local fullPath = workDir .. "/" .. relPath
-        local decOk, decErr = decryptAdeptEntryFile(fullPath, bookKey, false)
-        if not decOk then
+        local _decOk, decErr = decryptAdeptEntryFile(fullPath, bookKey, false)
+        if not _decOk then
             removeTree(workDir)
             return nil, "Failed to decrypt " .. relPath .. ": " .. decErr
         end
-        decOk = nil
         collectgarbage("step", 200)
         decryptCount = decryptCount + 1
     end
@@ -503,12 +502,11 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
     local forceNoDecompCount = 0
     for relPath in pairs(parsed.encryptedForceNoDecomp) do
         local fullPath = workDir .. "/" .. relPath
-        local decOk, decErr = decryptAdeptEntryFile(fullPath, bookKey, true)
-        if not decOk then
+        local _decOk, decErr = decryptAdeptEntryFile(fullPath, bookKey, true)
+        if not _decOk then
             removeTree(workDir)
             return nil, "Failed to decrypt " .. relPath .. ": " .. decErr
         end
-        decOk = nil
         collectgarbage("step", 200)
         forceNoDecompCount = forceNoDecompCount + 1
     end
@@ -527,8 +525,8 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
         return nil, watermarkErr
     end
 
-    local ok, repackErr = repackEpub(workDir, outputPath)
-    if not ok then
+    local repackOk, repackErr = repackEpub(workDir, outputPath)
+    if not repackOk then
         logger.warn("[ACSM] decryptAdobeEpub: failed to repack:", repackErr)
         removeTree(workDir)
         return nil, repackErr

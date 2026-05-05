@@ -68,7 +68,7 @@ function ASN.element(name, content)
         content._attr = nil
     end
     out = out .. ASN.byte(ASN.END_ATTRIBUTES)
-    
+
     -- FIXME: how does it work if we have attributes, but are a text node?
     if type(content) == 'string' then
         -- FIXME: support greater than 32k (chunking)
@@ -82,7 +82,7 @@ function ASN.element(name, content)
     end
 
     out = out .. ASN.byte(ASN.END_ELEMENT)
-    
+
     return out
 end
 

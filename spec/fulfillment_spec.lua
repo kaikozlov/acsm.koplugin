@@ -1,5 +1,3 @@
-local lfs = require("lfs")
-
 describe("fulfillment module", function()
 
     describe("downloadBook", function()

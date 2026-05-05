@@ -102,12 +102,7 @@ function zlib.inflateRaw(data)
 
         if rc == Z_STREAM_END then
             break
-        end
-        if rc == Z_OK then
-            -- keep going
-        elseif rc == Z_BUF_ERROR and produced > 0 then
-            -- zlib needs another output buffer
-        else
+        elseif rc ~= Z_OK and not (rc == Z_BUF_ERROR and produced > 0) then
             libz.inflateEnd(stream)
             return nil, "inflate failed: " .. tostring(rc)
         end

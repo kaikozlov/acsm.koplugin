@@ -30,7 +30,7 @@ local function uniqueCachePath(prefix, suffix)
     koutil.makePath(cacheDir)
     for i = 1, 999 do
         local path = cacheDir .. "/" .. prefix .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999)) .. suffix
-        local f, err = io.open(path, "wx")
+        local f = io.open(path, "wx")
         if f then
             f:close()
             return path
