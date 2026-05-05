@@ -15,7 +15,7 @@ DOCKER_ARCH ?= $(shell uname -m | sed 's/arm64/aarch64/' | grep -q aarch64 && ec
 IMAGE_NAME ?= acsm-test
 PLUGIN_DIR := $(shell pwd)
 
-.PHONY: help test lint docker-build docker-test docker-shell docker-busted clean
+.PHONY: help test lint docker-build docker-test docker-test-e2e docker-test-filter docker-shell docker-busted clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -52,6 +52,20 @@ docker-shell: docker-build ## Drop into a shell in the test container
 
 docker-busted: docker-build ## Run busted with custom args (pass ARGS="...")
 	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) busted-koreader $(ARGS)
+
+docker-test-e2e: docker-build ## Run E2E tests (requires network — downloads real ACSM from Adobe)
+	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
+		busted-koreader --verbose \
+		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
+		--filter=e2e \
+		/opt/acsm.koplugin/spec/integration/
+
+docker-test-filter: docker-build ## Run tests matching FILTER pattern (pass FILTER="...")
+	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
+		busted-koreader --verbose \
+		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
+		--filter="$(FILTER)" \
+		/opt/acsm.koplugin/spec/integration/
 
 # ---------------------------------------------------------------------------
 # Cleanup

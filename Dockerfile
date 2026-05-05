@@ -70,4 +70,6 @@ WORKDIR /opt/lib/koreader
 CMD ["busted-koreader", "--verbose", \
      "--helper=/opt/acsm.koplugin/spec/commonrequire.lua", \
      "--pattern=_spec", \
+     "--exclude-tags=e2e", \
      "/opt/acsm.koplugin/spec/integration/"]
+

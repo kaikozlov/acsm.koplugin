@@ -104,12 +104,15 @@ end
 
 --- Load a specific KOReader plugin by name.
 -- Useful for testing plugin interaction with real KOReader infrastructure.
+-- @param name Plugin name, with or without .koplugin suffix
 function load_plugin(name) -- luacheck: ignore
     local PluginLoader = require("pluginloader")
     local t = PluginLoader:_discover()
-    local plugin_id = name:gsub("%.koplugin$", "")
+    -- Normalize: ensure .koplugin suffix for comparison
+    local full_name = name:find("%.koplugin$") and name or (name .. ".koplugin")
+    local short_name = name:gsub("%.koplugin$", "")
     for _, v in ipairs(t) do
-        if v.name == plugin_id then
+        if v.name == full_name or v.name == short_name then
             PluginLoader:_load({ v })
             return
         end
@@ -124,6 +127,20 @@ function fastforward_ui_events() -- luacheck: ignore
     UIManager:shiftScheduledTasksBy(-1e9)
     UIManager:setInputTimeout(0)
     UIManager:handleInput()
+end
+
+--- Disable all plugins for isolated testing.
+-- From KOReader's upstream commonrequire.lua.
+function disable_plugins() -- luacheck: ignore
+    local PluginLoader = require("pluginloader")
+    PluginLoader.enabled_plugins = {}
+    PluginLoader.disabled_plugins = {}
+    PluginLoader.loaded_plugins = {}
+end
+
+--- Save a screenshot for debugging (headless framebuffer → PNG file).
+function screenshot(screen, filename) -- luacheck: ignore
+    screen:shot(data_dir .. "/screenshots/" .. filename)
 end
 
 -- Add our plugin's source to package.path so `require("adobe.*")` works

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fulfillmentToken xmlns="http://ns.adobe.com/adept"
+                  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <resourceItemInfo>
+    <resource>urn:uuid:723caf6a-0e27-44be-8733-904cede39cd2</resource>
+    <resourceItem>
+      <asset>
+        <assetType>application/epub+zip</assetType>
+      </asset>
+    </resourceItem>
+    <metadata>
+      <dc:title>The Adventures of Sherlock Holmes</dc:title>
+      <dc:creator>Arthur Conan Doyle</dc:creator>
+      <dc:identifier>urn:isbn:978-0-00-000000-0</dc:identifier>
+      <dc:publisher>Gutenberg Foundation</dc:publisher>
+      <dc:language>en</dc:language>
+    </metadata>
+    <licenseToken>
+      <licenseURL>https://contentserver.adobe.com/fulfillment</licenseURL>
+    </licenseToken>
+  </resourceItemInfo>
+  <operatorURL>https://contentserver.adobe.com/fulfillment</operatorURL>
+</fulfillmentToken>
