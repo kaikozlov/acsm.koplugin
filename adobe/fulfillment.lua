@@ -422,4 +422,8 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     }
 end
 
+-- Export internal functions for testing (underscore-prefixed = internal API)
+fulfillment._collectNotifyUrls = collectNotifyUrls
+fulfillment._signXmlBody = signXmlBody
+
 return fulfillment
