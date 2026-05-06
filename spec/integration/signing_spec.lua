@@ -169,6 +169,67 @@ describe("ASN.1 encoding (asn1.element)", function()
     end)
 end)
 
+describe("asn1.element negative cases", function()
+    local asn1
+
+    setup(function()
+        asn1 = require("adobe.util.asn1")
+    end)
+
+    it("throws on nil content", function()
+        assert.has.errors(function()
+            asn1.element("root", nil)
+        end)
+    end)
+
+    it("throws on non-string/table content (number)", function()
+        assert.has.errors(function()
+            asn1.element("root", 42)
+        end)
+    end)
+
+    it("throws on non-string/table content (boolean)", function()
+        assert.has.errors(function()
+            asn1.element("root", true)
+        end)
+    end)
+
+    it("throws on nil element name", function()
+        assert.has.errors(function()
+            asn1.element(nil, "text")
+        end)
+    end)
+
+    it("handles empty table content (no crash, produces empty element)", function()
+        local result = asn1.element("root", {})
+        -- BEGIN + tag + END_ATTRS + END
+        assert.is.truthy(result:find("root"))
+    end)
+
+    it("handles empty string content", function()
+        local result = asn1.element("root", "")
+        assert.is.truthy(#result > 0)
+    end)
+
+    it("handles unicode values correctly", function()
+        local result = asn1.element("root", { child = "日本語テスト" })
+        assert.is.truthy(result:find("日本語テスト"))
+    end)
+
+    it("handles deeply nested tables", function()
+        local result = asn1.element("root", {
+            a = { b = { c = "deep" } },
+        })
+        assert.is.truthy(result:find("deep"))
+    end)
+
+    it("handles strings longer than 255 bytes", function()
+        local longstr = string.rep("x", 300)
+        local result = asn1.element("root", longstr)
+        assert.is.truthy(#result > 300)
+    end)
+end)
+
 describe("crypto.signXML", function()
     local crypto, asn1, nc, util
 
@@ -233,5 +294,57 @@ describe("crypto.signXML", function()
         local sig_a = crypto.signXML("ns:root", key, makeTb("aaa"))
         local sig_b = crypto.signXML("ns:root", key, makeTb("bbb"))
         assert.is_not.equal(sig_a, sig_b)
+    end)
+end)
+
+describe("crypto.signXML negative cases", function()
+    local crypto
+
+    setup(function()
+        crypto = require("adobe.util.crypto")
+    end)
+
+    local function makeKey()
+        return crypto.key.new().pkey
+    end
+
+    it("throws on nil key", function()
+        assert.has.errors(function()
+            crypto.signXML("name", nil, { _attr = {} })
+        end)
+    end)
+
+    it("throws on string key (wrong type)", function()
+        assert.has.errors(function()
+            crypto.signXML("name", "not-a-key", { _attr = {} })
+        end)
+    end)
+
+    it("throws on crypto.key wrapper instead of raw pkey", function()
+        local wrapper = crypto.key.new()
+        assert.has.errors(function()
+            crypto.signXML("name", wrapper, { _attr = {} })
+        end)
+    end)
+
+    it("throws on nil element name", function()
+        local key = makeKey()
+        assert.has.errors(function()
+            crypto.signXML(nil, key, { _attr = {} })
+        end)
+    end)
+
+    it("throws on nil table", function()
+        local key = makeKey()
+        assert.has.errors(function()
+            crypto.signXML("name", key, nil)
+        end)
+    end)
+
+    it("succeeds with empty table (no _attr, no children)", function()
+        local key = makeKey()
+        local sig = crypto.signXML("name", key, {})
+        assert.is.truthy(sig)
+        assert.is.truthy(#sig > 0)
     end)
 end)
