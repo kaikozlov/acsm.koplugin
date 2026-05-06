@@ -26,17 +26,20 @@
 ## Testing
 
 All tests run inside Docker against **real KOReader** (headless). No mocks,
-no host-only tier. The Docker image ships the official KOReader Linux release
-with all native FFI libraries (`libcrypto.so.57`, `libz.so.1`, `libarchive`,
-`libSDL3`, etc.) so tests exercise the exact same code paths as the plugin
-on a real device.
+no host-only tier. Uses the [koplugin-dev](https://github.com/kaikozlov/koplugin-dev)
+Docker image (`ghcr.io/kaikozlov/koplugin-dev`) which ships the official
+KOReader Linux release with all native FFI libraries (`libcrypto.so.57`,
+`libz.so.1`, `libarchive`, `libSDL3`, etc.) so tests exercise the exact same
+code paths as the plugin on a real device.
 
 ```bash
+make setup                 # pull the koplugin-dev image (one-time)
 make test                  # run all tests (excludes e2e network tests)
 make test-e2e              # run e2e tests (hits real Adobe servers)
 make test-all              # run everything including e2e
 make test-filter FILTER="Crypto"  # run a subset by pattern
-make docker-shell          # drop into bash inside the container
+make shell                 # drop into bash inside the container
+make lint                  # run luacheck inside the container
 ```
 
 ### Spec layout
@@ -69,7 +72,7 @@ The test uses Adobe's smallest free sample ("God Is A Salesman" chapter 1,
 (PK zip header) and that decryption produced >0 entries.
 
 ```bash
-make test-e2e   # must have network; Docker needs --network=host on some setups
+make test-e2e   # must have network; uses --network=host
 ```
 
 No credentials or configuration are needed — anonymous sign-in works for
@@ -78,35 +81,21 @@ fail with a network or HTTP error.
 
 ### How it works
 
-- **Image**: `ubuntu:24.04` + KOReader Linux release + `lua-busted` (apt).
+- **Image**: `ghcr.io/kaikozlov/koplugin-dev:v2026.03_2` — unified dev image
+  with KOReader + busted + luacheck + stylua.
 - **KOReader**: extracted to `/opt/lib/koreader/`, includes bundled `luajit`.
-- **Plugin**: bind-mounted at `/opt/acsm.koplugin`, symlinked into KOReader's
-  plugins dir so `PluginLoader:_discover()` finds it.
-- **Bootstrap**: `spec/commonrequire.lua` (busted `--helper`) sets up headless
-  mode (`einkfb.dummy`, `Input.dummy`), isolated settings in `/tmp`, and
-  exposes `load_plugin()`, `fastforward_ui_events()`, `disable_plugins()`.
+- **Plugin**: bind-mounted at `/opt/plugin`, auto-symlinked into KOReader's
+  plugins dir by `entrypoint.sh` so `PluginLoader:_discover()` finds it.
+- **Bootstrap**: `/opt/koplugin-dev/commonrequire.lua` (busted `--helper`)
+  sets up headless mode (`einkfb.dummy`, `Input.dummy`), isolated settings
+  in `/tmp`, and exposes `load_plugin()`, `fastforward_ui_events()`,
+  `disable_plugins()`.
 - **Wrapper**: `/usr/local/bin/busted-koreader` invokes KOReader's `luajit`
   with `LUA_PATH` pointing at busted and KOReader modules.
 
-Defaults: `KOREADER_VERSION=v2026.03`, `DOCKER_ARCH=arm64`. For x86_64 CI:
-```bash
-make docker-build DOCKER_ARCH=x86_64
-```
-
-### Why apt's lua-busted instead of `luarocks install busted`
-
-LuaJIT has a hard 64K-constants-per-function limit. The luarocks.org
-manifest exceeds that, so **any** `luarocks install` against a LuaJIT-built
-LuaRocks fails with `main function has more than 65536 constants`. Ubuntu's
-`lua-busted` package sidesteps this entirely — it ships busted as plain Lua
-files that any Lua 5.1-compatible interpreter (including LuaJIT) can load.
-
 ### Key files
 
-- `Dockerfile` — Ubuntu base + KOReader release + lua-busted
-- `Makefile` — `test`, `test-e2e`, `test-all`, `test-filter`, `lint`, `clean`
-- `.dockerignore` — keeps `REFERENCE/`, `.git/`, build artifacts out of context
-- `spec/commonrequire.lua` — headless KOReader bootstrap (busted helper)
+- `Makefile` — `test`, `test-e2e`, `test-all`, `test-filter`, `lint`, `shell`
 - `spec/integration/fixtures/` — test fixtures (sample ACSM, etc.)
 - `adobe/util/adobehash.lua` — extracted hash buffer construction (testable separately from fulfillment)
 

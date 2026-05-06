@@ -9,7 +9,7 @@ describe("main.lua helpers", function()
     setup(function()
         koutil = require("util")
         DataStorage = require("datastorage")
-        plugin_path = os.getenv("PLUGIN_PATH") or "/opt/acsm.koplugin"
+        plugin_path = os.getenv("PLUGIN_PATH") or "/opt/plugin"
     end)
 
     before_each(function()

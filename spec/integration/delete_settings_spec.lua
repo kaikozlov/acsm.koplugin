@@ -12,7 +12,7 @@ describe("ACSM deletePluginSettings", function()
         ffiUtil = require("ffi/util")
         LuaSettings = require("luasettings")
         lfs = require("libs/libkoreader-lfs")
-        plugin_path = os.getenv("PLUGIN_PATH") or "/opt/acsm.koplugin"
+        plugin_path = os.getenv("PLUGIN_PATH") or "/opt/plugin"
     end)
 
     --- Recursively collect all file paths under a directory.

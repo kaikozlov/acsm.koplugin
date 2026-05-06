@@ -13,7 +13,7 @@ describe("ACSM plugin lifecycle", function()
         Screen = require("device").screen
         DocumentRegistry = require("document/documentregistry")
         DataStorage = require("datastorage")
-        plugin_path = os.getenv("PLUGIN_PATH") or "/opt/acsm.koplugin"
+        plugin_path = os.getenv("PLUGIN_PATH") or "/opt/plugin"
     end)
 
     describe("plugin loading", function()

@@ -1,82 +1,101 @@
 # Makefile for acsm.koplugin
-# All tests run inside Docker with KOReader's real LuaJIT + native libs.
 #
-# Usage:
-#   make test            — run all tests in Docker (excludes e2e/network tests)
-#   make test-e2e        — run E2E tests (requires network — hits real Adobe servers)
-#   make test-all        — run everything including e2e
-#   make test-filter     — run tests matching FILTER pattern (pass FILTER="...")
-#   make docker-build    — build the Docker test image
-#   make docker-shell    — shell into the Docker test container
-#   make lint            — run luacheck locally
+# Uses the koplugin-dev Docker image from GHCR for a unified test environment.
+# No local toolchain required — just Docker.
+#
+# Quick start:
+#   make setup     # pull the image (one-time)
+#   make test      # run all tests
+#   make test-e2e  # run e2e tests (hits real Adobe servers)
+#   make shell     # drop into the container
 
-KOREADER_VERSION ?= v2026.03
-# Auto-detect architecture: arm64 on Apple Silicon, x86_64 everywhere else
-DOCKER_ARCH ?= $(shell uname -m | sed 's/arm64/aarch64/' | grep -q aarch64 && echo arm64 || echo x86_64)
-IMAGE_NAME ?= acsm-test
-PLUGIN_DIR := $(shell pwd)
+PLUGIN_NAME := acsm
+KOPLUGIN_DEV_VERSION := v2026.03_2
+IMAGE := ghcr.io/kaikozlov/koplugin-dev:$(KOPLUGIN_DEV_VERSION)
 
-.PHONY: help test test-e2e test-all test-filter lint docker-build docker-shell clean
+# SDL dummy driver for headless KOReader
+SDL_ENV := -e SDL_VIDEODRIVER=dummy
 
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+# Mount current repo as /opt/plugin
+MOUNT := -v "$(PWD)":/opt/plugin -e PLUGIN_NAME=$(PLUGIN_NAME)
 
-# ---------------------------------------------------------------------------
-# Docker image (cached — only rebuilds when KOReader version changes)
-# ---------------------------------------------------------------------------
+# Standard run (no network)
+RUN := docker run --rm $(SDL_ENV) $(MOUNT) $(IMAGE)
+# Network-enabled run (for e2e tests that hit real servers)
+RUN_NETWORK := docker run --rm --network=host $(SDL_ENV) $(MOUNT) $(IMAGE)
+# Interactive run
+RUN_IT := docker run --rm -it $(SDL_ENV) $(MOUNT) $(IMAGE)
 
-docker-build: ## Build the Docker test image
-	docker build \
-		--build-arg KOREADER_VERSION=$(KOREADER_VERSION) \
-		--build-arg ARCH=$(DOCKER_ARCH) \
-		-t $(IMAGE_NAME) .
+# =============================================================================
+# Setup
+# =============================================================================
 
-# ---------------------------------------------------------------------------
-# Tests — all run inside Docker with real KOReader
-# ---------------------------------------------------------------------------
+.PHONY: setup
+setup: ## Pull the koplugin-dev image
+	docker pull $(IMAGE)
 
-test: docker-build ## Run all tests (excludes e2e network tests)
-	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
-		busted-koreader --verbose \
-		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
+# =============================================================================
+# Testing
+# =============================================================================
+
+.PHONY: test
+test: ## Run all tests (excludes e2e)
+	$(RUN) busted-koreader --verbose \
+		--helper=/opt/koplugin-dev/commonrequire.lua \
 		--exclude-tags=e2e \
-		/opt/acsm.koplugin/spec/
+		/opt/plugin/spec/
 
-test-e2e: docker-build ## Run E2E tests only (requires network — downloads real ACSM from Adobe)
-	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
-		busted-koreader --verbose \
-		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
+.PHONY: test-e2e
+test-e2e: ## Run E2E tests only (requires network — hits real Adobe servers)
+	$(RUN_NETWORK) busted-koreader --verbose \
+		--helper=/opt/koplugin-dev/commonrequire.lua \
 		--filter=e2e \
-		/opt/acsm.koplugin/spec/
+		/opt/plugin/spec/
 
-test-all: docker-build ## Run all tests including e2e
-	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
-		busted-koreader --verbose \
-		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
-		/opt/acsm.koplugin/spec/
+.PHONY: test-all
+test-all: ## Run all tests including e2e (requires network)
+	$(RUN_NETWORK) busted-koreader --verbose \
+		--helper=/opt/koplugin-dev/commonrequire.lua \
+		/opt/plugin/spec/
 
-test-filter: docker-build ## Run tests matching FILTER pattern (pass FILTER="...")
-	docker run --rm -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) \
-		busted-koreader --verbose \
-		--helper=/opt/acsm.koplugin/spec/commonrequire.lua \
+.PHONY: test-filter
+test-filter: ## Run tests matching FILTER pattern (pass FILTER="...")
+	$(RUN) busted-koreader --verbose \
+		--helper=/opt/koplugin-dev/commonrequire.lua \
 		--filter="$(FILTER)" \
-		/opt/acsm.koplugin/spec/
+		/opt/plugin/spec/
 
-docker-shell: docker-build ## Drop into a shell in the test container
-	docker run --rm -it -v "$(PLUGIN_DIR)":/opt/acsm.koplugin $(IMAGE_NAME) /bin/bash
+# =============================================================================
+# Linting
+# =============================================================================
 
-# ---------------------------------------------------------------------------
-# Local tools (no Docker needed)
-# ---------------------------------------------------------------------------
+.PHONY: lint
+lint: ## Run luacheck inside the container
+	$(RUN) luacheck /opt/plugin
 
-lint: ## Run luacheck
-	luacheck .
+# =============================================================================
+# Interactive
+# =============================================================================
 
-# ---------------------------------------------------------------------------
+.PHONY: shell
+shell: ## Drop into a shell in the dev container
+	$(RUN_IT) /bin/bash
+
+.PHONY: lua
+lua: ## Start KOReader's LuaJIT REPL
+	$(RUN_IT) /opt/lib/koreader/luajit
+
+# =============================================================================
 # Cleanup
-# ---------------------------------------------------------------------------
+# =============================================================================
 
-clean: ## Remove Docker images and test artifacts
-	docker rmi $(IMAGE_NAME) 2>/dev/null || true
+.PHONY: clean
+clean: ## Remove test artifacts
 	rm -f test-results.xml
+
+.PHONY: help
+help: ## Show this help
+	@echo "$(PLUGIN_NAME).koplugin targets:"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
