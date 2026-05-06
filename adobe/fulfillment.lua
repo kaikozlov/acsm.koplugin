@@ -10,6 +10,7 @@ local socketutil = require("socketutil")
 local koutil = require("util")
 
 local adobe = require("adobe.adobe")
+local adobehash = require("adobe.util.adobehash")
 local crypto = require("adobe.util.crypto")
 local dom = require("adobe.util.dom")
 local epub = require("adobe.epub")
@@ -17,12 +18,7 @@ local nativecrypto = require("adobe.util.nativecrypto")
 local util = require("adobe.util.util")
 local xml = require("adobe.util.xml")
 
-local ADEPT = "http://ns.adobe.com/adept"
-local ASN_NS_TAG = 1
-local ASN_CHILD = 2
-local ASN_END_TAG = 3
-local ASN_TEXT = 4
-local ASN_ATTRIBUTE = 5
+local ADEPT = adobehash.ADEPT
 
 local function uniqueCachePath(prefix, suffix)
     local cacheDir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
@@ -93,79 +89,8 @@ local function collectNotifyUrls(node, nsMap, urls)
     return urls
 end
 
-local function appendHashString(buf, value)
-    local len = #value
-    buf[#buf + 1] = string.char(math.floor(len / 256))
-    buf[#buf + 1] = string.char(len % 256)
-    buf[#buf + 1] = value
-end
-
-local function buildAdobeHashBuffer(node, nsMap, buf)
-    local childNsMap = dom.nsMapFor(node, nsMap)
-    local namespace, localname = dom.resolveNodeName(node, childNsMap)
-
-    if namespace == ADEPT and (localname == "hmac" or localname == "signature") then
-        return
-    end
-
-    buf[#buf + 1] = string.char(ASN_NS_TAG)
-    appendHashString(buf, namespace)
-    appendHashString(buf, localname)
-
-    local attrs = {}
-    for ak, av in pairs(node._attr or {}) do
-        if not ak:match("^xmlns") then
-            attrs[#attrs + 1] = { ak = ak, av = av }
-        end
-    end
-    table.sort(attrs, function(a, b) return a.ak < b.ak end)
-
-    for _, attr in ipairs(attrs) do
-        buf[#buf + 1] = string.char(ASN_ATTRIBUTE)
-        local prefix, attrLocal = attr.ak:match("^(.-):(.+)$")
-        if prefix then
-            appendHashString(buf, childNsMap[prefix] or "")
-            appendHashString(buf, attrLocal)
-        else
-            appendHashString(buf, "")
-            appendHashString(buf, attr.ak)
-        end
-        appendHashString(buf, attr.av)
-    end
-
-    buf[#buf + 1] = string.char(ASN_CHILD)
-    for _, child in ipairs(node._children or {}) do
-        if child._type == "TEXT" then
-            local trimmed = (child._text or ""):match("^%s*(.-)%s*$")
-            if trimmed and trimmed ~= "" then
-                local offset = 1
-                while offset <= #trimmed do
-                    local chunk = trimmed:sub(offset, offset + 0x7FFE)
-                    buf[#buf + 1] = string.char(ASN_TEXT)
-                    appendHashString(buf, chunk)
-                    offset = offset + #chunk
-                end
-            end
-        elseif child._type == "ELEMENT" then
-            buildAdobeHashBuffer(child, childNsMap, buf)
-        end
-    end
-
-    buf[#buf + 1] = string.char(ASN_END_TAG)
-end
-
-local function adobeDigest(xmlString)
-    local document = dom.parse(xmlString)
-    local root = dom.firstElementChild(document)
-    if not root then
-        return nil, "Missing XML root element"
-    end
-
-    local buf = {}
-    buildAdobeHashBuffer(root, {}, buf)
-
-    return nativecrypto.sha1(table.concat(buf))
-end
+local buildAdobeHashBuffer = adobehash.buildHashBuffer
+local adobeDigest = adobehash.digest
 
 local function signXmlBody(xmlString, signingKey)
     local hashBytes, err = adobeDigest(xmlString)
