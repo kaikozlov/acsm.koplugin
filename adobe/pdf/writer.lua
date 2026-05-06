@@ -83,9 +83,21 @@ function writer.serializeObject(obj)
         if obj == math.floor(obj) and math.abs(obj) < 2^53 then
             return tostring(math.floor(obj))
         end
-        local s = string.format("%.4f", obj)
-        s = s:gsub("0+$", "")
-        s = s:gsub("%.$", ".0")
+        -- Use enough precision to round-trip a Lua double (64-bit float)
+        -- without losing digits. "%.14g" gives ~15 significant figures which
+        -- is the full precision of double-precision floating point.
+        local s = string.format("%.14g", obj)
+        -- Ensure the output looks like a PDF number, not scientific notation
+        if s:find("e") or s:find("E") then
+            s = string.format("%.14f", obj)
+            s = s:gsub("0+$", "")
+            s = s:gsub("%.$", "")
+        end
+        -- Strip unnecessary trailing zeros for cleanliness
+        if s:find("%.") then
+            s = s:gsub("0+$", "")
+            s = s:gsub("%.$", "")
+        end
  return s
 
     elseif t == "boolean" then
@@ -153,11 +165,26 @@ function writer.serializeObject(obj)
 
         -- 7. Dict (has string keys) or Array (has only integer keys)
         if isDict(obj) then
-            local parts = {}
-            for k, v in pairs(obj) do
+            -- Correct malformed Mac OS resource fork metadata
+            -- (matches ineptpdf.py PDFSerializer.serialize_object):
+            -- If dict has /ResFork + /Type (integer) but no /Subtype,
+            -- rename /Type → /Subtype.
+            if obj.ResFork ~= nil and obj.Type ~= nil
+                    and obj.Subtype == nil and type(obj.Type) == "number" then
+                obj.Subtype = obj.Type
+                obj.Type = nil
+            end
+            -- Sort dict keys for deterministic output
+            local keys = {}
+            for k, _ in pairs(obj) do
                 if type(k) == "string" then
-                    parts[#parts + 1] = serializeName(k) .. " " .. writer.serializeObject(v)
+                    keys[#keys + 1] = k
                 end
+            end
+            table.sort(keys)
+            local parts = {}
+            for _, k in ipairs(keys) do
+                parts[#parts + 1] = serializeName(k) .. " " .. writer.serializeObject(obj[k])
             end
             return "<<" .. table.concat(parts) .. ">>"
         else
@@ -215,6 +242,18 @@ function writer.writeCleanPdf(inPath, outPath, doc, encrypt_objid)
         end
     end
 
+    -- Track last byte written so we can decide whether to emit \n
+    -- before endobj (can't read back from a "wb" file handle).
+    local lastByte = "\n"
+
+    --- Write helper that tracks last byte.
+    local function emit(s)
+        if #s > 0 then
+            out:write(s)
+            lastByte = s:sub(-1)
+        end
+    end
+
     for _, objid in ipairs(objids) do
         local obj = doc.objects[objid]
         local offset = out:seek()
@@ -224,8 +263,8 @@ function writer.writeCleanPdf(inPath, outPath, doc, encrypt_objid)
             doc.xref_entries[objid] = { offset = offset, genno = 0 }
         end
 
-        -- Write "N 0 obj\n"
-        out:write(string.format("%d 0 obj\n", objid))
+        -- Write "N 0 obj" (no trailing newline — matches ineptpdf.py)
+        emit(string.format("%d 0 obj", objid))
 
         -- Write the object body
         if type(obj) == "table" and obj.dic ~= nil and obj.rawdata ~= nil then
@@ -236,24 +275,29 @@ function writer.writeCleanPdf(inPath, outPath, doc, encrypt_objid)
             if type(dic) == "table" then
                 dic.Length = #data
             end
-            out:write(writer.serializeObject(dic))
-            out:write("\nstream\n")
-            out:write(data)
-            out:write("\nendstream")
+            emit(writer.serializeObject(dic))
+            emit("stream\n")
+            emit(data)
+            emit("\nendstream")
         elseif type(obj) == "table" and obj.stream_data ~= nil then
             -- Legacy stream API
             local data = obj.stream_data
             local dict = obj.dict or {}
             dict.Length = #data
-            out:write(writer.serializeObject(dict))
-            out:write("\nstream\n")
-            out:write(data)
-            out:write("\nendstream")
+            emit(writer.serializeObject(dict))
+            emit("stream\n")
+            emit(data)
+            emit("\nendstream")
         else
-            out:write(writer.serializeObject(obj))
+            emit(writer.serializeObject(obj))
         end
 
-        out:write("\nendobj\n")
+        -- Conditional newline before endobj (matches ineptpdf.py):
+        -- only emit \n if last written byte was alphanumeric
+        if lastByte:match("%w") then
+            emit("\n")
+        end
+        emit("endobj\n")
     end
 
     -- Cross-reference table
