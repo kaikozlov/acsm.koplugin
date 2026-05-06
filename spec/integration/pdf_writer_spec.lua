@@ -105,10 +105,10 @@ describe("PDF writer", function()
                 writer.serializeObject("col\r\n"))
         end)
 
-        it("escapes control characters as octal", function()
-            -- tab (byte 9) is a control char
+        it("escapes tabs as named escape", function()
+            -- tab (byte 9) is escaped as \t per PDF spec
             local s = writer.serializeObject("a\tb")
-            assert.truthy(s:match("^%(a\\%d%d%db%)$"))
+            assert.equals("(a\\tb)", s)
         end)
     end)
 
@@ -125,14 +125,16 @@ describe("PDF writer", function()
         end)
 
         it("serializes nested arrays", function()
-            assert.equals("[[1 2] [3 4]]",
+            -- Compact format: no space between ] and [
+            assert.equals("[[1 2][3 4]]",
                 writer.serializeObject({ { 1, 2 }, { 3, 4 } }))
         end)
 
         it("serializes mixed-type arrays", function()
             local arr = { 42, { name = "Catalog" }, "hello" }
             local s = writer.serializeObject(arr)
-            assert.equals("[42 /Catalog (hello)]", s)
+            -- Compact format: space only when both adjacent bytes are alnum
+            assert.equals("[42/Catalog(hello)]", s)
         end)
     end)
 
@@ -143,7 +145,8 @@ describe("PDF writer", function()
         it("serializes a simple dict", function()
             local d = { Type = { name = "Catalog" } }
             local s = writer.serializeObject(d)
-            assert.equals("<</Type /Catalog>>", s)
+            -- Compact format: no space between name and name value
+            assert.equals("<</Type/Catalog>>", s)
         end)
 
         it("serializes a dict with multiple keys", function()
@@ -154,8 +157,8 @@ describe("PDF writer", function()
             local s = writer.serializeObject(d)
             assert.truthy(s:match("^<<"))
             assert.truthy(s:match(">>$"))
-            assert.truthy(s:find("/Type /Page"))
-            assert.truthy(s:find("/Length 42"))
+            assert.truthy(s:find("/Type/Page"))
+            assert.truthy(s:find("/Length 42")) -- space before number
         end)
 
         it("serializes an empty dict", function()
@@ -262,7 +265,7 @@ describe("PDF writer", function()
 
             -- Object
             assert.truthy(content:find("1 0 obj"), "should have object header")
-            assert.truthy(content:find("/Type /Catalog"), "should have dict content")
+            assert.truthy(content:find("/Type/Catalog"), "should have dict content")
             assert.truthy(content:find("endobj"), "should have object footer")
 
             -- Cross-reference table
@@ -356,7 +359,7 @@ describe("PDF writer", function()
             f:close()
 
             assert.truthy(content:find("2 0 obj"), "should have stream object")
-            assert.truthy(content:find("/Filter /FlateDecode"), "should have filter")
+            assert.truthy(content:find("/Filter/FlateDecode"), "should have filter")
             assert.truthy(content:find("/Length 20"), "should have correct Length")
             assert.truthy(content:find("stream\n"), "should have stream keyword")
             assert.truthy(content:find("compressed data here"), "should have stream data")
