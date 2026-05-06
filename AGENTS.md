@@ -110,6 +110,39 @@ files that any Lua 5.1-compatible interpreter (including LuaJIT) can load.
 - `spec/integration/fixtures/` — test fixtures (sample ACSM, etc.)
 - `adobe/util/adobehash.lua` — extracted hash buffer construction (testable separately from fulfillment)
 
+### Format support
+
+The plugin supports **EPUB** and **PDF** — the only two formats Adobe DRMs via ACSM.
+
+Format detection happens at two levels:
+1. **ACSM metadata** (`dc:format`): `application/epub+zip` or `application/pdf`
+2. **Magic bytes after download**: `PK` (ZIP/EPUB) or `%PDF-` (PDF)
+
+The fulfillment pipeline (activation → auth → fulfill → RSA decrypt book key) is
+shared between both formats. After download, format-specific decryption takes over.
+
+**EPUB** (`adobe/epub.lua`):
+- ZIP container with `META-INF/encryption.xml` listing encrypted resources
+- AES-128-CBC on listed resources (16-byte random prefix + PKCS7 padding)
+- Removes `rights.xml`, rewrites `encryption.xml`, strips watermarks
+
+**PDF** (`adobe/pdf.lua` + `adobe/pdf/` directory):
+- Native PDF with per-object encryption (RC4 or AES)
+- Book key extracted via RSA; per-object keys derived with MD5 (genkey v2-v5)
+- PDF structure (xref, trailer, objects) parsed by pure-Lua tokenizer
+- Writes clean unencrypted PDF without `/Encrypt` dictionary
+
+Key PDF modules:
+
+| File | Role |
+|---|---|
+| `adobe/pdf.lua` | PDF decrypt orchestrator (like epub.lua) |
+| `adobe/pdf/parser.lua` | PDF tokenizer + object parser |
+| `adobe/pdf/writer.lua` | PDF serializer (clean output) |
+| `adobe/pdf/pdfdoc.lua` | Document-level reader (xref, trailer, objects) |
+| `adobe/pdf/pdfcrypt.lua` | Key derivation (genkey v2-v5) + hardening removal |
+| `adobe/pdf/rc4.lua` | Pure-Lua RC4 stream cipher |
+
 ### Test coverage overview
 
 173 tests total (excluding e2e). Key areas:
@@ -130,7 +163,13 @@ files that any Lua 5.1-compatible interpreter (including LuaJIT) can load.
 | EPUB internals | `epub_spec.lua` | 7 |
 | Fulfillment smoke | `fulfillment_spec.lua` | 1 |
 | deletePluginSettings hook | `integration/delete_settings_spec.lua` | 12 |
-| E2E (Adobe servers) | `integration/e2e_spec.lua` | 2 |
+| RC4 cipher | `integration/rc4_spec.lua` | 9 |
+| PDF key derivation | `integration/pdfcrypt_spec.lua` | 14 |
+| PDF tokenizer/parser | `integration/pdf_parser_spec.lua` | 81 |
+| PDF serializer/writer | `integration/pdf_writer_spec.lua` | 34 |
+| PDF document reader | `integration/pdfdoc_spec.lua` | 9 |
+| E2E EPUB (Adobe servers) | `integration/e2e_spec.lua` | 2 |
+| E2E PDF (Adobe servers) | `integration/pdf_e2e_spec.lua` | 2 |
 
 ### Key API note: crypto.key wrapper vs raw PKey
 

@@ -209,29 +209,40 @@ function ACSM:parseAcsmMetadata(acsm_path)
         title = title,
         resourceId = resource, -- e.g. "urn:uuid:d976a1af-..."
         identifier = identifier, -- e.g. ISBN
+        format = meta and meta["dc:format"] or nil, -- e.g. "application/pdf" or "application/epub+zip"
     }
 end
 
---- Build the output path for a fulfilled EPUB.
--- Extracts title from the ACSM metadata (no EPUB download needed).
--- Falls back to the ACSM filename with .epub extension.
+--- Build the output path for a fulfilled EPUB or PDF.
+-- Extracts title from the ACSM metadata (no download needed).
+-- Falls back to the ACSM filename with appropriate extension.
 function ACSM:deriveOutputPath(acsm_path, acsm_meta)
     local dir = util.splitFilePathName(acsm_path)
     if dir == "" then dir = "./" end
+
+    -- Determine extension from format metadata
+    local ext = ".epub"  -- default
+    if acsm_meta and acsm_meta.format then
+        local fmt = acsm_meta.format
+        if type(fmt) == "table" then fmt = fmt[1] end
+        if fmt == "application/pdf" then
+            ext = ".pdf"
+        end
+    end
 
     -- Title from ACSM metadata (parsed before fulfillment)
     if acsm_meta and acsm_meta.title then
         local safe = naming.sanitizeTitle(acsm_meta.title)
         if safe then
-            logger.info("[ACSM] deriveOutputPath: title=", acsm_meta.title)
-            return dir .. safe .. ".epub"
+            logger.info("[ACSM] deriveOutputPath: title=", acsm_meta.title, "ext=", ext)
+            return dir .. safe .. ext
         end
     end
 
-    -- Fallback: swap .acsm -> .epub
-    local output_path = acsm_path:gsub("%.[Aa][Cc][Ss][Mm]$", ".epub")
+    -- Fallback: swap .acsm -> ext
+    local output_path = acsm_path:gsub("%.[Aa][Cc][Ss][Mm]$", ext)
     if output_path == acsm_path then
-        output_path = acsm_path .. ".epub"
+        output_path = acsm_path .. ext
     end
     return output_path
 end

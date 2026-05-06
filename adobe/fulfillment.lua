@@ -357,27 +357,50 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     if err then return nil, err end
     logger.info("[ACSM] fulfillment.process: fulfillment OK, download URL=", result.src)
 
-    local tmpEpub = uniqueCachePath("fulfillment", ".epub")
-    logger.info("[ACSM] fulfillment.process: downloading book to", tmpEpub)
-    local _, downloadErr = fulfillment.downloadBook(result.src, tmpEpub)
+    -- Download the book (detect format from magic bytes)
+    local tmpFile = uniqueCachePath("fulfillment", ".bin")
+    logger.info("[ACSM] fulfillment.process: downloading book to", tmpFile)
+    local _, downloadErr = fulfillment.downloadBook(result.src, tmpFile)
     if downloadErr then
-        os.remove(tmpEpub)
+        os.remove(tmpFile)
         return nil, downloadErr
     end
     logger.info("[ACSM] fulfillment.process: download complete")
 
+    -- Detect format from magic bytes
+    local magicF = io.open(tmpFile, "rb")
+    local magic = magicF and magicF:read(10) or ""
+    if magicF then magicF:close() end
+
+    local isPdf = (magic:sub(1, 5) == "%PDF-")
+    local isEpub = (magic:sub(1, 4) == "PK" .. string.char(0x03, 0x04))
+
+    logger.info("[ACSM] fulfillment.process: format detected: ", isPdf and "PDF" or (isEpub and "EPUB" or "unknown"))
+
     logger.info("[ACSM] fulfillment.process: decrypting book key...")
     local bookKey, bookKeyErr = fulfillment.decryptBookKey(result.encryptedKey, creds.licenseKey)
     if not bookKey then
-        os.remove(tmpEpub)
+        os.remove(tmpFile)
         return nil, "Failed to decrypt book key: " .. bookKeyErr
     end
-    logger.info("[ACSM] fulfillment.process: book key decrypted, decrypting EPUB...")
+    logger.info("[ACSM] fulfillment.process: book key decrypted")
 
-    local decryptedInfo, decryptErr = epub.decryptAdobeEpub(tmpEpub, outputPath, bookKey)
-    os.remove(tmpEpub)
-    if not decryptedInfo then return nil, "Failed to decrypt EPUB: " .. decryptErr end
-    logger.info("[ACSM] fulfillment.process: EPUB decrypted to", outputPath)
+    local decryptedInfo, decryptErr
+    if isPdf then
+        logger.info("[ACSM] fulfillment.process: decrypting PDF...")
+        local pdf = require("adobe.pdf")
+        decryptedInfo, decryptErr = pdf.decryptAdobePdf(tmpFile, outputPath, bookKey)
+    else
+        logger.info("[ACSM] fulfillment.process: decrypting EPUB...")
+        decryptedInfo, decryptErr = epub.decryptAdobeEpub(tmpFile, outputPath, bookKey)
+    end
+
+    os.remove(tmpFile)
+    if not decryptedInfo then
+        local formatLabel = isPdf and "PDF" or "EPUB"
+        return nil, "Failed to decrypt " .. formatLabel .. ": " .. decryptErr
+    end
+    logger.info("[ACSM] fulfillment.process: book decrypted to", outputPath)
 
     if result.notifyURLs and #result.notifyURLs > 0 then
         for _, notifyURL in ipairs(result.notifyURLs) do
@@ -388,7 +411,7 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     return {
         outputPath = outputPath,
         bookKey = bookKey,
-        decryptedEntries = decryptedInfo.decryptedEntries,
+        decryptedEntries = decryptedInfo.decryptedEntries or decryptedInfo.decryptedObjects,
         remainingEncryptionXml = decryptedInfo.remainingEncryptionXml,
         response = result.response,
     }

@@ -1,0 +1,808 @@
+--- PDF document reader for ADEPT decryption.
+-- Reads PDF structure (xref, trailer, objects), extracts encryption info,
+-- and provides per-object decryption using the book key.
+--
+-- Ported from ineptpdf.py (PDFDocument, PDFXRef, PDFXRefStream).
+
+local logger = require("logger")
+
+local pdfparser = require("adobe.pdf.parser")
+local pdfcrypt = require("adobe.pdf.pdfcrypt")
+
+local pdfdoc = {}
+
+------------------------------------------------------------------------
+-- Helpers
+------------------------------------------------------------------------
+
+local function is_name(obj, expected)
+    if type(obj) ~= "table" then return false end
+    if getmetatable(obj) ~= pdfparser.PSLiteral then return false end
+    if expected then return obj.name == expected end
+    return true
+end
+
+local function is_keyword(obj, expected)
+    if type(obj) ~= "table" then return false end
+    if getmetatable(obj) ~= pdfparser.PSKeyword then return false end
+    if expected then return obj.name == expected end
+    return true
+end
+
+local function name_str(obj)
+    if type(obj) == "table" and getmetatable(obj) == pdfparser.PSLiteral then
+        return obj.name
+    end
+    return nil
+end
+
+local function int_value(x)
+    if x == nil then return 0 end
+    if type(x) == "number" then return x end
+    -- indirect ref? resolve later
+    return 0
+end
+
+--- Resolve a value that might be an indirect reference.
+local function resolve1(obj, objects)
+    if type(obj) == "table" and obj.ref then
+        return objects[obj.ref.objid]
+    end
+    return obj
+end
+
+local function dict_value(obj, objects)
+    obj = resolve1(obj, objects)
+    if type(obj) == "table" and not obj.ref then
+        return obj
+    end
+    return {}
+end
+
+local function list_value(obj, objects)
+    obj = resolve1(obj, objects)
+    if type(obj) ~= "table" then return { obj } end
+    return obj
+end
+
+------------------------------------------------------------------------
+-- PDFStream
+------------------------------------------------------------------------
+
+-- PDFStream is a plain table with these fields:
+--   dic      - the stream dictionary (table with string keys)
+--   rawdata  - raw (still encrypted) stream data
+--   data     - decoded data (after decrypt + decompress), nil until accessed
+--   decdata  - decrypted-but-not-decompressed data
+--   decdic   - decrypted dictionary
+--   objid    - object ID
+--   genno    - generation number
+--   decipher - decrypt function(objid, genno, data) -> decrypted data
+--
+-- This matches ineptpdf.py's PDFStream class exactly.
+
+local PDFStream = {}
+PDFStream.__index = PDFStream
+pdfdoc.PDFStream = PDFStream
+
+function PDFStream:new(dic, rawdata, decipher)
+    local stream = setmetatable({
+        dic = dic or {},
+        rawdata = rawdata or "",
+        decipher = decipher,
+        data = nil,
+        decdata = nil,
+        decdic = nil,
+        objid = 0,
+        genno = 0,
+    }, self)
+    return stream
+end
+
+function PDFStream:set_objid(objid, genno)
+    self.objid = objid
+    self.genno = genno
+end
+
+--- Decode the stream: decrypt (if cipher), then decompress (if filter).
+-- Matches ineptpdf.py PDFStream.decode()
+function PDFStream:decode(gen_xref_stm)
+    if self.data ~= nil then return end  -- already decoded
+    assert(self.rawdata ~= nil, "PDFStream:decode called with nil rawdata")
+
+    local data = self.rawdata
+
+    -- Step 1: Decrypt if we have a cipher
+    if self.decipher and data and #data > 0 then
+        data = self.decipher(self.objid, self.genno, data)
+        -- Also decrypt dict string values
+        local dic = pdfdoc.decipher_all(self.decipher, self.objid, self.genno, self.dic)
+        if gen_xref_stm then
+            self.decdata = data
+            self.decdic = dic
+        end
+    end
+
+    -- Step 2: Decompress if /Filter present
+    -- For clean output we write raw decrypted data (get_decdata),
+    -- so we don't actually need to decompress here for the main use case.
+    -- But keep it for completeness.
+    self.data = data
+    self.rawdata = nil
+end
+
+--- Get decoded (decrypted + decompressed) data.
+function PDFStream:get_data()
+    if self.data == nil then
+        self:decode()
+    end
+    return self.data
+end
+
+--- Get raw (still possibly encrypted) data.
+function PDFStream:get_rawdata()
+    return self.rawdata
+end
+
+--- Get decrypted data (not decompressed).
+-- This is what PDFSerializer uses for writing clean output.
+-- Matches ineptpdf.py PDFStream.get_decdata()
+function PDFStream:get_decdata()
+    if self.decdata ~= nil then
+        return self.decdata
+    end
+    local data = self.rawdata
+    if self.decipher and data and #data > 0 then
+        data = self.decipher(self.objid, self.genno, data)
+    end
+    return data
+end
+
+--- Get decrypted dictionary.
+-- Matches ineptpdf.py PDFStream.get_decdic()
+function PDFStream:get_decdic()
+    if self.decdic ~= nil then
+        return self.decdic
+    end
+    local dic = self.dic
+    if self.decipher and dic then
+        dic = pdfdoc.decipher_all(self.decipher, self.objid, self.genno, dic)
+    end
+    return dic
+end
+
+------------------------------------------------------------------------
+-- Classic xref table
+------------------------------------------------------------------------
+
+local PDFXRef = {}
+PDFXRef.__index = PDFXRef
+pdfdoc.PDFXRef = PDFXRef
+
+function PDFXRef:new()
+    return setmetatable({
+        offsets = {},   -- objid -> {genno, offset}
+        trailer = nil,
+    }, self)
+end
+
+function PDFXRef:objids()
+    local ids = {}
+    for id, _ in pairs(self.offsets) do
+        ids[#ids + 1] = id
+    end
+    table.sort(ids)
+    return ids
+end
+
+function PDFXRef:load(p)
+    -- After "xref" keyword, read subsections until "trailer"
+    while true do
+        local pos, line = p:nextline()
+        if not line or line == "" then
+            error("Premature EOF reading xref")
+        end
+        if line:match("^%s*trailer") then
+            p:seek(pos)
+            break
+        end
+        local start_s, nobjs_s = line:match("^%s*(%d+)%s+(%d+)%s*$")
+        if not start_s then
+            error("Invalid xref line: " .. tostring(line))
+        end
+        local start = tonumber(start_s)
+        local nobjs = tonumber(nobjs_s)
+        for i = 0, nobjs - 1 do
+            local _, entry_line = p:nextline()
+            if entry_line then
+                local offset_s, genno_s, use = entry_line:match("^%s*(%d+)%s+(%d+)%s+(%w)")
+                if use == "n" and offset_s then
+                    self.offsets[start + i] = {
+                        genno = tonumber(genno_s),
+                        offset = tonumber(offset_s),
+                    }
+                end
+            end
+        end
+    end
+    self:load_trailer(p)
+end
+
+function PDFXRef:load_trailer(p)
+    local _, tok = p:nexttoken()
+    if not is_keyword(tok, "trailer") then
+        error("Expected 'trailer' keyword")
+    end
+    local result = p:nextobject()
+    if not result or type(result[2]) ~= "table" then
+        error("Expected trailer dict")
+    end
+    self.trailer = result[2]
+end
+
+function PDFXRef:getpos(objid)
+    local entry = self.offsets[objid]
+    if not entry then return nil end
+    return entry.offset, entry.genno
+end
+
+------------------------------------------------------------------------
+-- XRef stream (PDF 1.5+)
+------------------------------------------------------------------------
+
+local PDFXRefStream = {}
+PDFXRefStream.__index = PDFXRefStream
+
+function PDFXRefStream:new()
+    return setmetatable({
+        index = {},     -- list of {first, size}
+        data = nil,
+        fl1 = 0, fl2 = 0, fl3 = 0,
+        entlen = 0,
+        trailer = nil,
+    }, self)
+end
+
+local function nunpack(s, default)
+    if not s or #s == 0 then return default or 0 end
+    local v = 0
+    for i = 1, #s do
+        v = v * 256 + s:byte(i)
+    end
+    return v
+end
+
+function PDFXRefStream:load(p)
+    -- The stream object follows the objid/genno/obj tokens
+    -- It's already been positioned by the caller
+    local _, obj = p:nextobject()
+    if type(obj) ~= "table" or not obj.rawdata then
+        error("Expected PDFStream for xref stream")
+    end
+
+    local dic = obj.dic or {}
+    local streamType = name_str(dic.Type or dic["Type"])
+    if streamType ~= "XRef" then
+        error("Invalid XRef stream: Type=" .. tostring(streamType))
+    end
+
+    local size = int_value(dic.Size or dic["size"])
+    local indexRaw = dic.Index or dic["index"]
+    if indexRaw == nil then
+        self.index = {{0, size}}
+    else
+        if type(indexRaw) ~= "table" then indexRaw = {indexRaw} end
+        self.index = {}
+        for i = 1, #indexRaw, 2 do
+            self.index[#self.index + 1] = { indexRaw[i], indexRaw[i+1] }
+        end
+    end
+
+    local w = dic.W or dic["w"]
+    if type(w) ~= "table" then w = {w, w, w} end
+    self.fl1 = int_value(w[1])
+    self.fl2 = int_value(w[2])
+    self.fl3 = int_value(w[3])
+    self.entlen = self.fl1 + self.fl2 + self.fl3
+
+    -- Decompress the stream data
+    local rawdata = obj.rawdata or ""
+    -- Try zlib decompress
+    local ok, zlib = pcall(require, "adobe.util.zlib")
+    if ok and zlib and #rawdata > 0 then
+        local inflater = zlib.rawInflater()
+        local decompressed = inflater:update(rawdata)
+        inflater:close()
+        self.data = decompressed or rawdata
+    else
+        self.data = rawdata
+    end
+
+    self.trailer = dic
+end
+
+function PDFXRefStream:objids()
+    local ids = {}
+    for _, idx in ipairs(self.index) do
+        local first, size = idx[1], idx[2]
+        for id = first, first + size - 1 do
+            ids[#ids + 1] = id
+        end
+    end
+    return ids
+end
+
+function PDFXRefStream:getpos(objid)
+    local offset = 0
+    for _, idx in ipairs(self.index) do
+        local first, size = idx[1], idx[2]
+        if first <= objid and objid < first + size then
+            local i = self.entlen * ((objid - first) + offset)
+            if i + self.entlen > #self.data then return nil end
+            local ent = self.data:sub(i + 1, i + self.entlen) -- Lua 1-indexed
+            local f1 = nunpack(ent:sub(1, self.fl1), 1)
+            if f1 == 1 then
+                -- Object at offset
+                local pos = nunpack(ent:sub(self.fl1 + 1, self.fl1 + self.fl2))
+                return pos, 0
+            elseif f1 == 2 then
+                -- Object in ObjStm
+                local stmid = nunpack(ent:sub(self.fl1 + 1, self.fl1 + self.fl2))
+                local stindex = nunpack(ent:sub(self.fl1 + self.fl2 + 1))
+                return nil, 0, stmid, stindex  -- signal: need ObjStm
+            end
+            -- free object
+            return nil
+        end
+        offset = offset + size
+    end
+    return nil
+end
+
+------------------------------------------------------------------------
+-- PDFDocument
+------------------------------------------------------------------------
+
+local PDFDocument = {}
+PDFDocument.__index = PDFDocument
+pdfdoc.PDFDocument = PDFDocument
+
+function PDFDocument:new()
+    return setmetatable({
+        xrefs = {},
+        objs = {},          -- objid -> parsed object
+        trailer = nil,
+        encryption = nil,   -- { docid, param } from trailer
+        encrypt_objid = nil,
+        root = nil,
+        header = nil,
+        file = nil,
+        parser = nil,
+    }, self)
+end
+
+--- Open and parse a PDF file's structure (xref, trailer, encryption).
+function PDFDocument:open(filepath)
+    local f, err = io.open(filepath, "rb")
+    if not f then return nil, "Cannot open file: " .. err end
+    self.file = f
+
+    -- Read header
+    self.header = f:read(8) or "%PDF-1.0"
+    if not self.header:match("^%%PDF") then
+        -- Not a valid PDF header, but we'll try anyway
+        logger.warn("[pdfdoc] File does not start with %PDF header")
+    end
+
+    -- Skip the binary comment line
+    local p = pdfparser.new(f)
+    self.parser = p
+
+    -- Find xref
+    self.xrefs = self:_read_xref()
+
+    -- Collect trailer info
+    for _, xref in ipairs(self.xrefs) do
+        local trailer = xref.trailer
+        if not trailer then goto continue end
+
+        -- Extract encryption info
+        if trailer.Encrypt or trailer["Encrypt"] then
+            local encryptRef = trailer.Encrypt or trailer["Encrypt"]
+            if type(encryptRef) == "table" and encryptRef.ref then
+                self.encrypt_objid = encryptRef.ref.objid
+            end
+            local idList = trailer.ID or trailer["id"] or {}
+            if type(idList) ~= "table" then idList = {idList} end
+            -- Actually load the Encrypt dict object from the file
+            -- (don't use getobj yet — decipher isn't set, and we want the
+            -- raw encrypted dict to read encryption parameters)
+            local encryptDict = {}
+            if type(encryptRef) == "table" and encryptRef.ref then
+                local encObj = self:_loadRawObject(encryptRef.ref.objid)
+                if type(encObj) == "table" and not encObj.ref then
+                    encryptDict = encObj
+                end
+            elseif type(encryptRef) == "table" and not encryptRef.ref then
+                encryptDict = encryptRef
+            end
+            self.encryption = {
+                docid = idList,
+                param = encryptDict,
+            }
+        end
+
+        -- Extract root
+        if trailer.Root or trailer["Root"] then
+            self.root = trailer.Root or trailer["Root"]
+            break
+        end
+
+        ::continue::
+    end
+
+    return true
+end
+
+function PDFDocument:close()
+    if self.file then
+        self.file:close()
+        self.file = nil
+    end
+end
+
+--- Find the startxref offset by scanning backwards from EOF.
+function PDFDocument:_find_xref()
+    local f = self.file
+    f:seek("end", -1024)  -- search last 1KB
+    local chunk = f:read(1024) or ""
+    -- Find "startxref" followed by a number
+    local startxref_pos = chunk:match("startxref%s+(%d+)")
+    if startxref_pos then
+        return tonumber(startxref_pos)
+    end
+    return nil, "startxref not found"
+end
+
+--- Read xref tables starting from a given offset.
+function PDFDocument:_read_xref_from(start, xrefs)
+    local f = self.file
+    local p = pdfparser.new(f)
+    p:seek(start)  -- parser.new() resets to 0, so we must seek
+
+    local _, token = p:nexttoken()
+
+    if type(token) == "number" then
+        -- XRef stream (PDF 1.5+): starts with objid
+        f:seek("set", start)
+        p = pdfparser.new(f)
+        local xref = PDFXRefStream:new()
+        -- Read objid genno obj tokens then the stream
+        local _, objid_tok = p:nexttoken()  -- objid (number)
+        local _, genno_tok = p:nexttoken()  -- genno (number)
+        local _, kwd_tok = p:nexttoken()    -- "obj" keyword
+        -- Now read the stream object
+        local _, stream_obj = p:nextobject()
+        -- Build a pseudo-stream with raw data
+        -- We need to read the raw bytes between "stream\n" and "\nendstream"
+        if type(stream_obj) == "table" and not stream_obj.ref then
+            -- It's a dict; find the stream data after it
+            local stream_start = p:tell()
+            -- Search forward for "stream" keyword
+            f:seek("set", start)
+            local content = f:read(65536) or ""
+            local streamMarker = content:find("stream[\r\n]", 1, true)
+            if streamMarker then
+                local dataStart = content:find("[\r\n]", streamMarker + 6) + 1
+                local length = int_value(stream_obj.Length or stream_obj["length"])
+                if length > 0 and dataStart + length <= #content then
+                    local rawdata = content:sub(dataStart, dataStart + length - 1)
+                    stream_obj.rawdata = rawdata
+                end
+            end
+            xref:load_from_obj(stream_obj, start)
+        end
+        xrefs[#xrefs + 1] = xref
+
+        -- Follow Prev/XRefStm chains
+        local trailer = xref.trailer
+        if trailer then
+            if trailer.XRefStm or trailer["XRefStm"] then
+                local pos = int_value(trailer.XRefStm or trailer["XRefStm"])
+                self:_read_xref_from(pos, xrefs)
+            end
+            if trailer.Prev or trailer["Prev"] then
+                local pos = int_value(trailer.Prev or trailer["Prev"])
+                self:_read_xref_from(pos, xrefs)
+            end
+        end
+    elseif is_keyword(token, "xref") then
+        -- Classic xref table
+        -- We need to skip past the "xref" line and read subsections.
+        -- Read raw bytes from the file to find end of "xref" line.
+        f:seek("set", start)
+        local header = f:read(256) or ""
+        local xref_end = header:find("\n", 1, true)
+        if xref_end then
+            p:seek(start + xref_end) -- past the "xref\n" line
+        else
+            p:seek(start + 5) -- skip "xref\n"
+        end
+        local xref = PDFXRef:new()
+        xref:load(p)
+        xrefs[#xrefs + 1] = xref
+
+        -- Follow Prev chain
+        local trailer = xref.trailer
+        if trailer and (trailer.Prev or trailer["Prev"]) then
+            local pos = int_value(trailer.Prev or trailer["Prev"])
+            self:_read_xref_from(pos, xrefs)
+        end
+    else
+        -- Fallback: scan whole file for objects
+        logger.warn("[pdfdoc] No valid xref found, scanning file for objects")
+        f:seek("set", 0)
+        p = pdfparser.new(f)
+        local offsets = {}
+        while true do
+            local pos, line = p:nextline()
+            if not line then break end
+            local objid_s, genno_s = line:match("^(%d+)%s+(%d+)%s+obj")
+            if objid_s then
+                offsets[tonumber(objid_s)] = {genno = tonumber(genno_s), offset = pos}
+            end
+            if line:match("^%s*trailer") then
+                -- Try to parse trailer
+                local ok, xref2 = pcall(function()
+                    local x = PDFXRef:new()
+                    x.offsets = offsets
+                    x:load_trailer(p)
+                    return x
+                end)
+                if ok then
+                    xrefs[#xrefs + 1] = xref2
+                end
+            end
+        end
+        if #xrefs == 0 and next(offsets) then
+            -- At least store the offsets even without trailer
+            local xref2 = PDFXRef:new()
+            xref2.offsets = offsets
+            xrefs[#xrefs + 1] = xref2
+        end
+    end
+end
+
+--- Read all xref tables.
+function PDFDocument:_read_xref()
+    local xrefs = {}
+    local ok, err = pcall(function()
+        local pos = self:_find_xref()
+        if pos then
+            self:_read_xref_from(pos, xrefs)
+        end
+    end)
+    if not ok then
+        logger.warn("[pdfdoc] Error reading xref: ", err)
+    end
+    if #xrefs == 0 then
+        -- Fallback scan
+        self:_read_xref_from(0, xrefs)
+    end
+    return xrefs
+end
+
+--- Load an object by its objid from the file.
+-- This is THE central method — it integrates parsing and decryption.
+-- Matches ineptpdf.py PDFDocument.getobj() exactly.
+--
+-- For each object:
+--   1. Find offset from xref
+--   2. Seek parser there, parse the object
+--   3. If it's a stream, set objid/genno on it
+--   4. If decipher is set, call decipher_all on non-stream objects
+--   5. Cache the result
+function PDFDocument:getobj(objid)
+    if self.objs[objid] then
+        return self.objs[objid]
+    end
+
+    -- Find the offset from xrefs
+    local offset = nil
+    local genno = 0
+    for _, xref in ipairs(self.xrefs) do
+        offset = xref:getpos(objid)
+        if offset then
+            break
+        end
+    end
+    if not offset then
+        return nil  -- object not found
+    end
+
+    -- Parse the object at that offset
+    local p = pdfparser.new(self.file)
+    p:seek(offset)
+
+    -- Read objid genno obj tokens
+    local _, objid_tok = p:nexttoken()
+    local _, genno_tok = p:nexttoken()
+    local _, kwd_tok   = p:nexttoken()
+
+    -- Now parse the actual object
+    local result = p:nextobject()
+    if not result then
+        return nil
+    end
+
+    local obj = result[2]
+    local real_genno = type(genno_tok) == "number" and genno_tok or 0
+
+    -- If it's a stream, upgrade to PDFStream and set objid/genno
+    if type(obj) == "table" and obj.dic ~= nil and obj.rawdata ~= nil then
+        -- Promote the raw table to a PDFStream instance so methods work
+        setmetatable(obj, PDFStream)
+        obj:set_objid(objid, real_genno)
+        -- Attach decipher if the document has one
+        if self.decipher then
+            obj.decipher = self.decipher
+        end
+    elseif self.decipher then
+        -- Non-stream object: decrypt all string values
+        obj = pdfdoc.decipher_all(self.decipher, objid, real_genno, obj)
+    end
+
+    self.objs[objid] = obj
+    return obj
+end
+
+--- Load an object without decryption (for reading the Encrypt dict itself).
+-- The Encrypt dict must be read raw because its parameters tell us
+-- HOW to decrypt everything else.
+function PDFDocument:_loadRawObject(objid)
+    if self.objs[objid] then return self.objs[objid] end
+
+    local offset = nil
+    for _, xref in ipairs(self.xrefs) do
+        offset = xref:getpos(objid)
+        if offset then break end
+    end
+    if not offset then return nil end
+
+    local p = pdfparser.new(self.file)
+    p:seek(offset)
+
+    -- Skip objid genno obj tokens
+    p:nexttoken()  -- objid
+    p:nexttoken()  -- genno
+    p:nexttoken()  -- obj keyword
+
+    local result = p:nextobject()
+    if not result then return nil end
+
+    local obj = result[2]
+    -- If it's a stream, upgrade to PDFStream and set objid/genno
+    if type(obj) == "table" and obj.dic ~= nil and obj.rawdata ~= nil then
+        setmetatable(obj, PDFStream)
+        obj:set_objid(objid, 0)
+    end
+
+    self.objs[objid] = obj
+    return obj
+end
+
+--- Old name for compatibility.
+function PDFDocument:loadObject(objid)
+    return self:getobj(objid)
+end
+
+--- Get all objids from all xref sections.
+function PDFDocument:allObjids()
+    local seen = {}
+    local ids = {}
+    for _, xref in ipairs(self.xrefs) do
+        for _, id in ipairs(xref:objids()) do
+            if not seen[id] then
+                seen[id] = true
+                ids[#ids + 1] = id
+            end
+        end
+    end
+    table.sort(ids)
+    return ids
+end
+
+--- Get the encryption filter name (e.g., "EBX_HANDLER" or "Standard").
+function PDFDocument:getEncryptionFilter()
+    if not self.encryption then return nil end
+    local param = self.encryption.param
+    local filter = param.Filter or param["filter"]
+    if type(filter) == "table" and getmetatable(filter) == pdfparser.PSLiteral then
+        return filter.name
+    elseif type(filter) == "string" then
+        return filter
+    end
+    return nil
+end
+
+--- Extract ADEPT_LICENSE from the encryption dict.
+-- Returns: license_xml (string), ebx_bookid (string), or nil
+function PDFDocument:extractAdeptLicense()
+    if not self.encryption then return nil end
+    local param = self.encryption.param
+    local adept_license = param.ADEPT_LICENSE or param["adept_license"]
+    if type(adept_license) ~= "string" or #adept_license == 0 then
+        return nil
+    end
+    local ebx_bookid = param.EBX_BOOKID or param["ebx_bookid"]
+    if type(ebx_bookid) == "string" then
+        ebx_bookid = ebx_bookid
+    else
+        ebx_bookid = nil
+    end
+    return adept_license, ebx_bookid
+end
+
+------------------------------------------------------------------------
+-- Decryption
+------------------------------------------------------------------------
+
+--- Decrypt a single PDF object (recursively).
+-- Recursively applies the decipher function to all string values.
+-- Matches ineptpdf.py decipher_all.
+--
+-- Critical: PSLiteral and PSKeyword are tables with a .name string field,
+-- but those fields must NOT be decrypted — they are PDF names like /Type
+-- which are stored unencrypted in the PDF.
+function pdfdoc.decipher_all(decipher_fn, objid, genno, obj)
+    if type(obj) == "string" then
+        return decipher_fn(objid, genno, obj)
+    end
+    if type(obj) ~= "table" then return obj end
+    if obj.ref then return obj end  -- indirect ref, don't decrypt
+    -- PSLiteral and PSKeyword: their .name field is a PDF identifier,
+    -- not encrypted data. Return as-is.
+    local mt = getmetatable(obj)
+    if mt == pdfparser.PSLiteral or mt == pdfparser.PSKeyword then
+        return obj
+    end
+    if obj.dic ~= nil and obj.rawdata ~= nil then
+        -- PDFStream: don't recurse into stream here,
+        -- stream handles its own decryption via get_decdata/get_decdic
+        return obj
+    end
+    local result = {}
+    for k, v in pairs(obj) do
+        result[k] = pdfdoc.decipher_all(decipher_fn, objid, genno, v)
+    end
+    return result
+end
+
+
+
+
+
+--- Get the trailer with /Encrypt removed (for clean output).
+function PDFDocument:getCleanTrailer()
+    local trailer = {}
+    local source = nil
+    for _, xref in ipairs(self.xrefs) do
+        if xref.trailer then source = xref.trailer end
+    end
+    if not source then return {} end
+
+    for k, v in pairs(source) do
+        if k ~= "Encrypt" and k ~= "Prev" and k ~= "XRefStm" then
+            trailer[k] = v
+        end
+    end
+    return trailer
+end
+
+--- Set the decipher function on the document.
+-- Once set, getobj() will transparently decrypt all loaded objects.
+function PDFDocument:set_decipher(decipher_fn)
+    self.decipher = decipher_fn
+end
+
+return pdfdoc
