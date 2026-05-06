@@ -8,6 +8,7 @@ local logger = require("logger")
 
 local pdfparser = require("adobe.pdf.parser")
 local pdfcrypt = require("adobe.pdf.pdfcrypt")
+local ffi = require("ffi")
 
 local pdfdoc = {}
 
@@ -33,6 +34,7 @@ local function name_str(obj)
     if type(obj) == "table" and getmetatable(obj) == pdfparser.PSLiteral then
         return obj.name
     end
+    if type(obj) == "string" then return obj end
     return nil
 end
 
@@ -41,6 +43,36 @@ local function int_value(x)
     if type(x) == "number" then return x end
     -- indirect ref? resolve later
     return 0
+end
+
+--- Apply PNG Up predictor decoding (Predictor 12).
+-- Strips filter bytes and reconstructs rows.
+-- @param data string compressed data with filter bytes
+-- @param params table with Columns and Predictor keys
+-- @return string unpredicted data (columns bytes per row)
+local function _unpredict(data, params)
+    local predictor = params.Predictor or params["predictor"] or params["Predictor"]
+    if not predictor or predictor == 0 then return data end
+    local columns = params.Columns or params["columns"] or params["Columns"] or 1
+    if columns == 0 then return data end
+    local row_len = columns + 1
+    local buf = {}
+    local prev = string.rep("\0", columns)
+    for i = 0, #data - 1, row_len do
+        if i + row_len > #data then break end
+        local filter = data:byte(i + 1)
+        local row = data:sub(i + 2, i + row_len)
+        if filter == 2 then
+            local parts = {}
+            for j = 1, #row do
+                parts[j] = string.char((row:byte(j) + prev:byte(j)) % 256)
+            end
+            row = table.concat(parts)
+        end
+        buf[#buf + 1] = row
+        prev = row
+    end
+    return table.concat(buf)
 end
 
 --- Resolve a value that might be an indirect reference.
@@ -298,11 +330,11 @@ function PDFXRefStream:load(p)
         end
     end
 
-    local w = dic.W or dic["w"]
-    if type(w) ~= "table" then w = {w, w, w} end
-    self.fl1 = int_value(w[1])
-    self.fl2 = int_value(w[2])
-    self.fl3 = int_value(w[3])
+    local w_val = dic.W or dic["w"] or dic["W"]
+    if type(w_val) ~= "table" then w_val = {w_val, w_val, w_val} end
+    self.fl1 = int_value(w_val[1])
+    self.fl2 = int_value(w_val[2])
+    self.fl3 = int_value(w_val[3])
     self.entlen = self.fl1 + self.fl2 + self.fl3
 
     -- Decompress the stream data
@@ -310,10 +342,30 @@ function PDFXRefStream:load(p)
     -- Try zlib decompress
     local ok, zlib = pcall(require, "adobe.util.zlib")
     if ok and zlib and #rawdata > 0 then
-        local inflater = zlib.rawInflater()
-        local decompressed = inflater:update(rawdata)
+        local inflater = zlib.inflater()
+        local parts = {}
+        local ok = inflater:update(rawdata, #rawdata, function(ptr, len)
+            parts[#parts + 1] = ffi.string(ptr, len)
+        end)
         inflater:close()
-        self.data = decompressed or rawdata
+        local decompressed = (parts[1] and table.concat(parts) or nil)
+        if decompressed then
+            -- Predictor 12 may be inlined from DecodeParms. Columns may be missing;
+            -- derive from W array (= fl1+fl2+fl3 = entlen)
+            local has_predictor = int_value(dic.Predictor or dic["predictor"] or dic["Predictor"])
+            if has_predictor ~= 0 then
+                local params = dic
+                if not params.Columns and not params["columns"] then
+                    params = {}
+                    for k, v in pairs(dic) do params[k] = v end
+                    params.Columns = params.Columns or params["columns"] or self.entlen
+                end
+                decompressed = _unpredict(decompressed, params)
+            end
+            self.data = decompressed
+        else
+            self.data = rawdata
+        end
     else
         self.data = rawdata
     end
@@ -321,6 +373,66 @@ function PDFXRefStream:load(p)
     self.trailer = dic
 end
 
+--- Load from a pre-parsed stream object (for _read_xref_from).
+function PDFXRefStream:load_from_obj(obj, start)
+    if type(obj) ~= "table" or not obj.rawdata then
+        error("Expected PDFStream for xref stream")
+    end
+    local dic = obj.dic or {}
+    local streamType = name_str(dic.Type or dic["Type"] or dic["type"])
+    if streamType ~= "XRef" then
+        error("Invalid XRef stream: Type=" .. tostring(streamType))
+    end
+    local size = int_value(dic.Size or dic["size"] or dic["Size"])
+    local indexRaw = dic.Index or dic["index"] or dic["Index"]
+    if indexRaw == nil then
+        self.index = {{0, size}}
+    else
+        if type(indexRaw) ~= "table" then indexRaw = {indexRaw} end
+        self.index = {}
+        for i = 1, #indexRaw, 2 do
+            self.index[#self.index + 1] = { indexRaw[i], indexRaw[i+1] }
+        end
+    end
+    local w_val = dic.W or dic["w"] or dic["W"]
+    if type(w_val) ~= "table" then w_val = {w_val, w_val, w_val} end
+    self.fl1 = int_value(w_val[1])
+    self.fl2 = int_value(w_val[2])
+    self.fl3 = int_value(w_val[3])
+    self.entlen = self.fl1 + self.fl2 + self.fl3
+    local rawdata = obj.rawdata or ""
+    local ok, zlib_mod = pcall(require, "adobe.util.zlib")
+    if ok and zlib_mod and #rawdata > 0 then
+        local inflater = zlib_mod.inflater()
+        local parts = {}
+        local ok2 = inflater:update(rawdata, #rawdata, function(ptr, len)
+            parts[#parts + 1] = ffi.string(ptr, len)
+        end)
+        inflater:close()
+        local decompressed = (parts[1] and table.concat(parts) or nil)
+        if decompressed then
+            -- Predictor 12 may be inlined from DecodeParms. Columns may be missing;
+            -- derive from W array (= fl1+fl2+fl3 = entlen)
+            local has_predictor = int_value(dic.Predictor or dic["predictor"] or dic["Predictor"])
+            if has_predictor ~= 0 then
+                local params = dic
+                if not params.Columns and not params["columns"] then
+                    params = {}
+                    for k, v in pairs(dic) do params[k] = v end
+                    params.Columns = params.Columns or params["columns"] or self.entlen
+                end
+                decompressed = _unpredict(decompressed, params)
+            end
+            self.data = decompressed
+        else
+            self.data = rawdata
+        end
+    else
+        self.data = rawdata
+    end
+
+    self.trailer = dic
+end
 function PDFXRefStream:objids()
     local ids = {}
     for _, idx in ipairs(self.index) do
@@ -485,21 +597,121 @@ function PDFDocument:_read_xref_from(start, xrefs)
         local _, stream_obj = p:nextobject()
         -- Build a pseudo-stream with raw data
         -- We need to read the raw bytes between "stream\n" and "\nendstream"
-        if type(stream_obj) == "table" and not stream_obj.ref then
-            -- It's a dict; find the stream data after it
-            local stream_start = p:tell()
-            -- Search forward for "stream" keyword
+        -- Build a pseudo-stream with raw data.
+        -- If nextobject gave us a dict, extract rawdata.
+        -- If it failed (nested <<>> in DecodeParms etc.), parse manually.
+        if type(stream_obj) ~= "table" or stream_obj.ref or not stream_obj.dic then
+            -- Fallback: parse raw PDF text ourselves
             f:seek("set", start)
             local content = f:read(65536) or ""
-            local streamMarker = content:find("stream[\r\n]", 1, true)
+            -- Pattern search for "stream" followed by CR/LF (PDF spec allows \r\n, \r, or \n)
+            local streamMarker = content:find("stream[\r\n]")
+            if streamMarker then
+                local dataStart = content:find("[\r\n]", streamMarker + 6) + 1
+                local endMarker = content:find("endstream", dataStart, true)
+                if endMarker then
+                    local realEnd = endMarker - 1
+                    while realEnd >= dataStart do
+                        local b = content:byte(realEnd)
+                        if b ~= 10 and b ~= 13 then break end
+                        realEnd = realEnd - 1
+                    end
+                    stream_obj = {dic = {}, rawdata = content:sub(dataStart, realEnd)}
+                    local dictStart = content:find("<<", 1, true)
+                    if dictStart and dictStart < streamMarker then
+                        -- Manual PDF dict parser for flat key-value pairs
+                        local dictRaw = content:sub(dictStart + 2, streamMarker - 1)
+                        local function parseDict(raw)
+                            local result = {}
+                            local pp = 1
+                            while pp <= #raw do
+                                while pp <= #raw do
+                                    local b = raw:byte(pp)
+                                    if b ~= 32 and b ~= 10 and b ~= 13 and b ~= 9 and b ~= 12 then break end
+                                    pp = pp + 1
+                                end
+                                if pp > #raw then break end
+                                if raw:byte(pp) == 62 then break end
+                                if raw:byte(pp) == 47 then
+                                    pp = pp + 1
+                                    local keyStart = pp
+                                    while pp <= #raw do
+                                        local b = raw:byte(pp)
+                                        if b == 32 or b == 10 or b == 13 or b == 9 or b == 12 or b == 47 or b == 60 or b == 62 then break end
+                                        pp = pp + 1
+                                    end
+                                    local key = raw:sub(keyStart, pp - 1):lower()
+                                    while pp <= #raw do
+                                        local b = raw:byte(pp)
+                                        if b ~= 32 and b ~= 10 and b ~= 13 and b ~= 9 and b ~= 12 then break end
+                                        pp = pp + 1
+                                    end
+                                    local b = raw:byte(pp)
+                                    if b >= 48 and b <= 57 or b == 45 then
+                                        local valStart = pp
+                                        while pp <= #raw do
+                                            b = raw:byte(pp)
+                                            if not (b >= 48 and b <= 57 or b == 45 or b == 46) then break end
+                                            pp = pp + 1
+                                        end
+                                        result[key] = tonumber(raw:sub(valStart, pp - 1)) or raw:sub(valStart, pp - 1)
+                                    elseif b == 47 then
+                                        pp = pp + 1
+                                        local valStart = pp
+                                        while pp <= #raw do
+                                            b = raw:byte(pp)
+                                            if b == 32 or b == 10 or b == 13 or b == 9 or b == 12 or b == 47 or b == 60 or b == 62 then break end
+                                            pp = pp + 1
+                                        end
+                                        result[key] = raw:sub(valStart, pp - 1)
+                                    elseif b == 91 then
+                                        local arrStart = pp + 1
+                                        local depth = 1
+                                        while pp <= #raw and depth > 0 do
+                                            pp = pp + 1
+                                            local b2 = raw:byte(pp)
+                                            if b2 == 91 then depth = depth + 1
+                                            elseif b2 == 93 then depth = depth - 1 end
+                                        end
+                                        local arrStr = raw:sub(arrStart, pp - 1)
+                                        pp = pp + 1
+                                        local arr = {}
+                                        for n in arrStr:gmatch("%S+") do
+                                            local v = tonumber(n)
+                                            if v then arr[#arr + 1] = v end
+                                        end
+                                        result[key] = arr
+                                    else
+                                        while pp <= #raw do
+                                            b = raw:byte(pp)
+                                            if b == 32 or b == 10 or b == 13 or b == 9 or b == 12 then break end
+                                            pp = pp + 1
+                                        end
+                                    end
+                                else
+                                    pp = pp + 1
+                                end
+                            end
+                            return result
+                        end
+                        stream_obj.dic = parseDict(dictRaw)
+                    end
+                end
+            end
+        else
+            f:seek("set", start)
+            local content = f:read(65536) or ""
+            -- Pattern search for "stream" followed by CR/LF (PDF spec allows \r\n, \r, or \n)
+            local streamMarker = content:find("stream[\r\n]")
             if streamMarker then
                 local dataStart = content:find("[\r\n]", streamMarker + 6) + 1
                 local length = int_value(stream_obj.Length or stream_obj["length"])
-                if length > 0 and dataStart + length <= #content then
-                    local rawdata = content:sub(dataStart, dataStart + length - 1)
-                    stream_obj.rawdata = rawdata
+                if length and length > 0 and dataStart + length <= #content then
+                    stream_obj.rawdata = content:sub(dataStart, dataStart + length - 1)
                 end
             end
+        end
+        if type(stream_obj) == "table" and not stream_obj.ref then
             xref:load_from_obj(stream_obj, start)
         end
         xrefs[#xrefs + 1] = xref
@@ -532,11 +744,17 @@ function PDFDocument:_read_xref_from(start, xrefs)
         xref:load(p)
         xrefs[#xrefs + 1] = xref
 
-        -- Follow Prev chain
+        -- Follow XRefStm/Prev chains
         local trailer = xref.trailer
-        if trailer and (trailer.Prev or trailer["Prev"]) then
-            local pos = int_value(trailer.Prev or trailer["Prev"])
-            self:_read_xref_from(pos, xrefs)
+        if trailer then
+            if trailer.XRefStm or trailer["XRefStm"] then
+                local pos = int_value(trailer.XRefStm or trailer["XRefStm"])
+                self:_read_xref_from(pos, xrefs)
+            end
+            if trailer.Prev or trailer["Prev"] then
+                local pos = int_value(trailer.Prev or trailer["Prev"])
+                self:_read_xref_from(pos, xrefs)
+            end
         end
     else
         -- Fallback: scan whole file for objects
@@ -607,15 +825,17 @@ function PDFDocument:getobj(objid)
         return self.objs[objid]
     end
 
-    -- Find the offset from xrefs
-    local offset = nil
-    local genno = 0
+    local offset, genno, stmid, stindex
     for _, xref in ipairs(self.xrefs) do
-        offset = xref:getpos(objid)
-        if offset then
-            break
-        end
+        offset, genno, stmid, stindex = xref:getpos(objid)
+        if offset or stmid then break end
     end
+
+    if stmid then
+        self:_expandObjStm(stmid)
+        return self.objs[objid]
+    end
+
     if not offset then
         return nil  -- object not found
     end
@@ -662,10 +882,14 @@ end
 function PDFDocument:_loadRawObject(objid)
     if self.objs[objid] then return self.objs[objid] end
 
-    local offset = nil
+    local offset, genno, stmid, stindex
     for _, xref in ipairs(self.xrefs) do
-        offset = xref:getpos(objid)
-        if offset then break end
+        offset, genno, stmid, stindex = xref:getpos(objid)
+        if offset or stmid then break end
+    end
+    if stmid then
+        self:_expandObjStm(stmid)
+        return self.objs[objid]
     end
     if not offset then return nil end
 
@@ -689,6 +913,124 @@ function PDFDocument:_loadRawObject(objid)
 
     self.objs[objid] = obj
     return obj
+end
+
+--- Expand a compressed object stream (ObjStm) and cache its child objects.
+-- Matches ineptpdf.py PDFDocument.getobj() ObjStm handling (lines 1833-1879).
+function PDFDocument:_expandObjStm(stmid)
+    if self._expanded_stms and self._expanded_stms[stmid] then return end
+
+    -- Load the container stream object
+    local stm = self:getobj(stmid)
+    if not stm or type(stm) ~= "table" or stm.dic == nil then return end
+
+    -- Get decrypted raw data, then decompress (FlateDecode)
+    local data = stm:get_decdata()
+    if not data or #data == 0 then return end
+
+    local ok, zlib_mod = pcall(require, "adobe.util.zlib")
+    if ok and zlib_mod then
+        local inflater = zlib_mod.inflater()
+        local parts = {}
+        inflater:update(data, #data, function(ptr, len)
+            parts[#parts + 1] = ffi.string(ptr, len)
+        end)
+        inflater:close()
+        if parts[1] then
+            data = table.concat(parts)
+        end
+    end
+
+    -- Parse N (number of child objects) from the decompressed data
+    local n = tonumber(stm.dic.N or stm.dic["n"]) or 0
+    if n == 0 then return end
+
+    -- Parse the header: N pairs of (objid, offset)
+    -- Format: whitespace-separated decimal integers, followed by concatenated object content
+    local pos = 1
+    local function skipWhitespace()
+        while pos <= #data do
+            local b = data:byte(pos)
+            if b ~= 32 and b ~= 10 and b ~= 13 and b ~= 9 and b ~= 12 and b ~= 0 then break end
+            pos = pos + 1
+        end
+    end
+    local function parseInteger()
+        skipWhitespace()
+        local start = pos
+        while pos <= #data do
+            local b = data:byte(pos)
+            if b < 48 or b > 57 then break end
+            pos = pos + 1
+        end
+        if start > pos - 1 then return nil end
+        return tonumber(data:sub(start, pos - 1))
+    end
+
+    local pairs_list = {}
+    for i = 1, n do
+        local oid = parseInteger()
+        local off = parseInteger()
+        if not oid then break end
+        pairs_list[i] = {objid = oid, offset = off}
+    end
+
+    -- The remaining data (after the header) contains the serialized objects
+    -- at offsets specified in the header pairs.
+    -- Build a memory-backed file for the parser by using a tempfile
+    -- (Lua PDF parser requires a real file handle).
+    skipWhitespace()
+    local objectsBase = pos
+
+    if #pairs_list < n then
+        logger.warn("[pdfdoc] _expandObjStm: only parsed ", #pairs_list, " of ", n, " header pairs")
+    end
+
+    for idx, pair in ipairs(pairs_list) do
+        if not self.objs[pair.objid] then
+            local objStart = objectsBase + pair.offset
+            -- Determine end: if this is the last object, it goes to EOF;
+            -- otherwise it ends at the next object's start
+            local objEnd
+            if idx < #pairs_list then
+                objEnd = objectsBase + pairs_list[idx + 1].offset
+            else
+                objEnd = #data + 1
+            end
+
+            if objStart < objEnd and objStart <= #data then
+                local childData = data:sub(objStart, objEnd - 1)
+                -- Parse through a tempfile (parser needs real file)
+                local tmpname = os.tmpname and os.tmpname()
+                if tmpname then
+                    local tmpf = io.open(tmpname, "wb")
+                    if tmpf then
+                        tmpf:write(childData)
+                        tmpf:close()
+                        local fh = io.open(tmpname, "rb")
+                        if fh then
+                            local tmpp = pdfparser.new(fh)
+                            local result = tmpp:nextobject()
+                            if result and result[2] then
+                                local child = result[2]
+                                if type(child) == "table" and child.dic ~= nil and child.rawdata ~= nil then
+                                    setmetatable(child, PDFStream)
+                                    child:set_objid(pair.objid, 0)
+                                    if self.decipher then child.decipher = self.decipher end
+                                end
+                                self.objs[pair.objid] = child
+                            end
+                            fh:close()
+                        end
+                        os.remove(tmpname)
+                    end
+                end
+            end
+        end
+    end
+
+    if not self._expanded_stms then self._expanded_stms = {} end
+    self._expanded_stms[stmid] = true
 end
 
 --- Old name for compatibility.

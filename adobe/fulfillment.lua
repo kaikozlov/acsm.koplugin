@@ -377,20 +377,25 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
 
     logger.info("[ACSM] fulfillment.process: format detected: ", isPdf and "PDF" or (isEpub and "EPUB" or "unknown"))
 
-    logger.info("[ACSM] fulfillment.process: decrypting book key...")
-    local bookKey, bookKeyErr = fulfillment.decryptBookKey(result.encryptedKey, creds.licenseKey)
-    if not bookKey then
-        os.remove(tmpFile)
-        return nil, "Failed to decrypt book key: " .. bookKeyErr
-    end
-    logger.info("[ACSM] fulfillment.process: book key decrypted")
-
     local decryptedInfo, decryptErr
+    local bookKey  -- may be nil for PDF (extracted internally)
     if isPdf then
         logger.info("[ACSM] fulfillment.process: decrypting PDF...")
         local pdf = require("adobe.pdf")
-        decryptedInfo, decryptErr = pdf.decryptAdobePdf(tmpFile, outputPath, bookKey)
+        -- PDF path: let decryptAdobePdf extract the book key from the PDF's
+        -- ADEPT_LICENSE, handling hardening removal automatically.
+        -- Pass fulfillment encrypted key as fallback for older ADEPT schemes
+        -- that don't embed ADEPT_LICENSE in the PDF.
+        decryptedInfo, decryptErr = pdf.decryptAdobePdf(tmpFile, outputPath, nil, creds.licenseKey, result.encryptedKey)
     else
+        logger.info("[ACSM] fulfillment.process: decrypting book key...")
+        bookKey, bookKeyErr = fulfillment.decryptBookKey(result.encryptedKey, creds.licenseKey)
+        if not bookKey then
+            os.remove(tmpFile)
+            return nil, "Failed to decrypt book key: " .. bookKeyErr
+        end
+        logger.info("[ACSM] fulfillment.process: book key decrypted")
+
         logger.info("[ACSM] fulfillment.process: decrypting EPUB...")
         decryptedInfo, decryptErr = epub.decryptAdobeEpub(tmpFile, outputPath, bookKey)
     end

@@ -3,12 +3,13 @@
 --
 -- Architecture matches ineptpdf.py (DeDRM_tools) exactly:
 --   1. PDFDocument opens the file, reads xref/trailer
---   2. A decipher function is set on the document
---   3. PDFDocument.getobj() transparently decrypts every object on load
+--   2. Extract book key from ADEPT_LICENSE (with hardening removal if needed)
+--   3. A decipher function is set on the document
+--   4. PDFDocument.getobj() transparently decrypts every object on load
 --      - Strings get decrypted via decipher_all()
 --      - Streams get their rawdata decrypted via PDFStream.get_decdata()
 --      - Stream dict string values get decrypted via PDFStream.get_decdic()
---   4. The writer iterates all objects via getobj() and writes clean output
+--   5. The writer iterates all objects via getobj() and writes clean output
 --
 -- The key insight from ineptpdf.py: decryption is NOT a separate pass.
 -- It is integrated into the object loading path so that every access
@@ -30,16 +31,60 @@ local util = require("adobe.util.util")
 local pdf = {}
 
 ------------------------------------------------------------------------
--- ADEPT_LICENSE extraction
+-- Rights XML helpers
 ------------------------------------------------------------------------
 
 --- Extract and decode the ADEPT license from the PDF encryption dict.
--- @param encParam table the /Encrypt dictionary values
+-- @param doc PDFDocument (needed for resolving indirect references)
+-- @param encParam table the /Encrypt dictionary values (may be a stream object)
 -- @return table parsed rights XML, or nil, error
-local function extractRights(encParam)
-    local adept_license = encParam.ADEPT_LICENSE or encParam["adept_license"]
+local function extractRights(doc, encParam)
+    local adept_license = nil
+
+    -- Case 1: ADEPT_LICENSE is a direct string key in the dict
+    if type(encParam.ADEPT_LICENSE) == "string" then
+        adept_license = encParam.ADEPT_LICENSE
+    elseif type(encParam["adept_license"]) == "string" then
+        adept_license = encParam["adept_license"]
+    end
+
+    -- Case 2: ADEPT_LICENSE is an indirect reference — dereference it
+    if not adept_license then
+        local licRef = encParam.ADEPT_LICENSE or encParam["adept_license"]
+        if type(licRef) == "table" and licRef.ref then
+            local licObj = doc:_loadRawObject(licRef.ref.objid)
+            if licObj then
+                -- The referenced object might be a string or a stream
+                if type(licObj) == "string" then
+                    adept_license = licObj
+                elseif type(licObj) == "table" and licObj.dic then
+                    -- Stream: use rawdata as the license
+                    adept_license = licObj.rawdata
+                end
+            end
+        end
+    end
+
+    -- Case 3: Encrypt dict is a stream object — the rawdata IS the ADEPT_LICENSE
+    if not adept_license and type(encParam) == "table" and encParam.dic then
+        adept_license = encParam.rawdata
+    end
+
     if type(adept_license) ~= "string" or #adept_license == 0 then
-        return nil, "No ADEPT_LICENSE in encryption dictionary"
+        -- Build a diagnostic message with available keys for debugging
+        local hasStream, keyList = false, {}
+        if type(encParam) == "table" then
+            if encParam.dic then
+                hasStream = true
+                for k in pairs(encParam.dic) do keyList[#keyList+1] = tostring(k) end
+            else
+                for k in pairs(encParam) do keyList[#keyList+1] = tostring(k) end
+            end
+        end
+        local diag = "No ADEPT_LICENSE in encryption dict"
+            .. (hasStream and " (stream)" or "")
+            .. " keys=[" .. table.concat(keyList, ",") .. "]"
+        return nil, diag
     end
 
     -- ADEPT_LICENSE is base64-encoded, then zlib-compressed
@@ -63,18 +108,60 @@ local function extractRights(encParam)
     return rights
 end
 
---- Extract the encrypted key from the rights XML.
+--- Find a text value in a rights XML tree by element name.
+-- Handles both namespaced ({http://ns.adobe.com/adept}resource) and
+-- bare (resource) element names.
+local function findRightsText(t, name)
+    if type(t) ~= "table" then return nil end
+
+    -- Try direct access with common name variants
+    local direct = t[name]
+        or t["{" .. "http://ns.adobe.com/adept" .. "}" .. name]
+    if direct then
+        if type(direct) == "string" then return direct end
+        if type(direct) == "table" then
+            local text = direct[1] or direct._text
+            if type(text) == "string" then return text end
+        end
+    end
+
+    -- Recurse into sub-tables
+    for _, v in pairs(t) do
+        if type(v) == "table" then
+            local found = findRightsText(v, name)
+            if found then return found end
+        end
+    end
+    return nil
+end
+
+--- Extract the encrypted key and key metadata from the rights XML.
 -- @param rights table parsed rights XML
--- @return string base64-encoded encrypted key
+-- @return string base64-encoded encrypted key, or nil
 -- @return string keyType attribute (or "0")
 -- @return table rights document (for hardening removal)
 local function extractEncryptedKey(rights)
     local function findEncryptedKey(t)
         if type(t) ~= "table" then return nil end
+        -- Check for encryptedKey with possible namespace prefixes
+        for k, v in pairs(t) do
+            if type(k) == "string" and k:find("encryptedKey", 1, true) then
+                if type(v) == "table" then
+                    local text = v[1] or v._text
+                    if type(text) == "string" then
+                        local keyType = v.keyType or v["keyType"] or "0"
+                        return text, keyType
+                    end
+                elseif type(v) == "string" then
+                    return v, "0"
+                end
+            end
+        end
+        -- Also check bare "encryptedKey" field
         if t.encryptedKey then
             local ek = t.encryptedKey
             if type(ek) == "table" then
-                local text = ek[1] or ek._text or ek
+                local text = ek[1] or ek._text
                 if type(text) == "string" then
                     local keyType = ek.keyType or ek["keyType"] or "0"
                     return text, keyType
@@ -83,7 +170,7 @@ local function extractEncryptedKey(rights)
                 return ek, "0"
             end
         end
-        for k, v in pairs(t) do
+        for _, v in pairs(t) do
             if type(v) == "table" then
                 local found, kt = findEncryptedKey(v)
                 if found then return found, kt end
@@ -97,6 +184,97 @@ local function extractEncryptedKey(rights)
         return nil, "Could not find encryptedKey in rights XML", "0"
     end
     return encKeyB64, keyType, rights
+end
+
+------------------------------------------------------------------------
+-- Book key extraction from PDF's ADEPT_LICENSE
+------------------------------------------------------------------------
+
+--- Extract the book key for ADEPT-encrypted PDFs.
+-- Attempts to extract from the PDF's /Encrypt dict first (supports hardening removal).
+-- Falls back to decrypting the fulfillment response's encrypted key directly.
+--
+-- @param doc PDFDocument (already opened)
+-- @param licenseKey table {pkey = rawPKey} for RSA decryption
+-- @param fulfillmentEncryptedKey string optional: base64-encoded encrypted key from fulfillment response
+-- @return string decrypted book key, or nil, error
+local function extractBookKey(doc, licenseKey, fulfillmentEncryptedKey)
+    local encParam = doc.encryption and doc.encryption.param
+    if not encParam then
+        return nil, "No /Encrypt dict in PDF"
+    end
+
+    local bookKeyRaw = nil
+    local keyType = "0"
+
+    -- Try to extract ADEPT_LICENSE from the PDF (supports hardening removal)
+    local rights, rightsErr = extractRights(doc, encParam)
+    if rights then
+        -- Found ADEPT_LICENSE — full path with hardening support
+        local encKeyB64, kt, rightsDoc = extractEncryptedKey(rights)
+        if encKeyB64 then
+            logger.info("[ACSM] pdf: encryptedKey found in PDF, keyType=", kt)
+            bookKeyRaw = util.base64.decode(encKeyB64)
+            keyType = kt
+
+            -- Handle hardening if needed
+            if tonumber(keyType) > 2 then
+                bookKeyRaw = removeHardeningFromRights(bookKeyRaw, keyType, rightsDoc)
+                if not bookKeyRaw then
+                    return nil, "Hardening removal failed"
+                end
+            end
+        end
+    end
+
+    -- Fallback: use fulfillment response encrypted key
+    if not bookKeyRaw and fulfillmentEncryptedKey then
+        logger.info("[ACSM] pdf: using fulfillment encryptedKey (no ADEPT_LICENSE in PDF)")
+        bookKeyRaw = util.base64.decode(fulfillmentEncryptedKey)
+        if not bookKeyRaw then
+            return nil, "Failed to base64-decode fulfillment encryptedKey"
+        end
+        -- When using fulfillment key, we can't do hardening removal
+        -- (needs UUIDs from rights XML which isn't available)
+        -- This is acceptable for older ADEPT books (keyType <= 2)
+    end
+
+    if not bookKeyRaw then
+        return nil, "No encrypted key available (neither in PDF nor from fulfillment)"
+    end
+
+    -- RSA-decrypt the book key
+    local bookKey, rsaErr = licenseKey.pkey:decrypt(bookKeyRaw, nativecrypto.RSA_PKCS1_PADDING)
+    if not bookKey then
+        return nil, "RSA decrypt of book key failed: " .. tostring(rsaErr)
+    end
+
+    logger.info("[ACSM] pdf: book key extracted successfully, length=", #bookKey)
+    return bookKey
+end
+
+--- Extract UUIDs from rights XML and call removeHardening.
+local function removeHardeningFromRights(bookKeyRaw, keyType, rights)
+    local resourceUUID = findRightsText(rights, "resource")
+    local deviceUUID = findRightsText(rights, "device")
+    local fulfillmentUUID = findRightsText(rights, "fulfillment")
+
+    if not resourceUUID or not deviceUUID or not fulfillmentUUID then
+        logger.warn("[ACSM] pdf: missing UUIDs in rights XML for hardening removal")
+        return nil
+    end
+
+    resourceUUID = resourceUUID:match("uuid:(.+)") or resourceUUID
+    deviceUUID = deviceUUID:match("uuid:(.+)") or deviceUUID
+    fulfillmentUUID = fulfillmentUUID:match("uuid:(.+)") or fulfillmentUUID
+    fulfillmentUUID = fulfillmentUUID:sub(1, 36)
+
+    logger.info("[ACSM] pdf: removing ADEPT hardening (keyType=", keyType, ")")
+    return pdfcrypt.removeHardening(
+        bookKeyRaw, keyType,
+        resourceUUID, deviceUUID, fulfillmentUUID,
+        nativecrypto.aes_cbc_decrypt
+    )
 end
 
 ------------------------------------------------------------------------
@@ -141,15 +319,19 @@ end
 --- Decrypt an ADEPT-encrypted PDF.
 -- Matches the architecture of ineptpdf.py decryptBook():
 --   1. Open PDF, parse xref/trailer/encryption
---   2. Determine encryption params, create decipher function
---   3. Set decipher on document (getobj() now transparently decrypts)
---   4. Iterate all objects, write clean output
+--   2. Extract book key (with hardening removal if available)
+--   3. Determine encryption params, create decipher function
+--   4. Set decipher on document (getobj() now transparently decrypts)
+--   5. Iterate all objects, write clean output
 --
 -- @param inputPath string path to the encrypted PDF
 -- @param outputPath string path to write the decrypted PDF
--- @param bookKey string the decrypted book key (from RSA decryption in fulfillment)
+-- @param bookKey string the decrypted book key, OR nil if licenseKey is provided
+-- @param licenseKey table optional: {pkey = rawPKey} for extracting book key from PDF
+-- @param fulfillmentEncryptedKey string optional: base64-encoded encrypted key from fulfillment response
+--        Used as fallback when PDF doesn't contain ADEPT_LICENSE (older ADEPT scheme).
 -- @return table info about the decryption, or nil, error
-function pdf.decryptAdobePdf(inputPath, outputPath, bookKey)
+function pdf.decryptAdobePdf(inputPath, outputPath, bookKey, licenseKey, fulfillmentEncryptedKey)
     logger.info("[ACSM] pdf.decryptAdobePdf: input=", inputPath, "output=", outputPath)
 
     -- 1. Open and parse the PDF structure
@@ -174,26 +356,42 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey)
         end
     end
 
-    -- 3. Extract ADEPT_LICENSE and decode it (for logging/diagnostics)
+    -- 3. Extract or use the book key
+    --    If licenseKey is provided, extract the book key from the PDF's
+    --    ADEPT_LICENSE with full hardening removal support.
+    if licenseKey and not bookKey then
+        logger.info("[ACSM] pdf: licenseKey provided, extracting book key from PDF...")
+        local extractedKey, keyErr = extractBookKey(doc, licenseKey, fulfillmentEncryptedKey)
+        if not extractedKey then
+            doc:close()
+            return nil, "Book key extraction failed: " .. tostring(keyErr)
+        end
+        bookKey = extractedKey
+    elseif not bookKey then
+        doc:close()
+        return nil, "No bookKey or licenseKey provided"
+    end
+
+    -- 4. Log ADEPT_LICENSE for diagnostics
     local adeptLicense, ebxBookid = doc:extractAdeptLicense()
-    if not adeptLicense then
-        logger.info("[ACSM] pdf: no ADEPT_LICENSE in PDF, using provided book key directly")
-    else
-        logger.info("[ACSM] pdf: found ADEPT_LICENSE, extracting rights...")
-        local rights, rightsErr = extractRights({ADEPT_LICENSE = adeptLicense})
+    if adeptLicense then
+        logger.info("[ACSM] pdf: ADEPT_LICENSE present in PDF")
+        local rights, rightsErr = extractRights(doc, {ADEPT_LICENSE = adeptLicense})
         if rights then
-            local encKeyB64, keyType, rightsDoc = extractEncryptedKey(rights)
+            local encKeyB64, keyType = extractEncryptedKey(rights)
             if encKeyB64 then
-                logger.info("[ACSM] pdf: found encryptedKey, keyType=", keyType)
+                logger.info("[ACSM] pdf: encryptedKey in PDF, keyType=", keyType)
             end
-        else
-            logger.warn("[ACSM] pdf: could not parse ADEPT_LICENSE:", rightsErr)
         end
     end
 
-    -- 4. Determine encryption parameters from /Encrypt dict
+    -- 5. Determine encryption parameters from /Encrypt dict
     --    Matches ineptpdf.py initialize_ebx_inept key derivation logic
     local encParam = doc.encryption and doc.encryption.param or {}
+    -- If Encrypt is a stream object, use its dictionary
+    if type(encParam) == "table" and encParam.dic then
+        encParam = encParam.dic
+    end
     local ebx_V = tonumber(encParam.V or encParam["v"] or 4)
     local ebx_type = tonumber(encParam.EBX_ENCRYPTIONTYPE or encParam["ebx_encryptiontype"] or 6)
     local length = math.floor(tonumber(encParam.Length or encParam["length"] or 128) / 8)
@@ -203,7 +401,7 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey)
     local encInfo = pdfcrypt.determineEncryption(bookKey, ebx_V, ebx_type, length)
     logger.info("[ACSM] pdf: encryption V=", encInfo.V, "cipher=", encInfo.cipher)
 
-    -- 5. Create and set the decipher function on the document
+    -- 6. Create and set the decipher function on the document
     --    After this, doc:getobj(objid) transparently decrypts every object
     local decipher_fn
     if encInfo.cipher == "aes" or encInfo.cipher == "aes256" then
@@ -213,7 +411,7 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey)
     end
     doc:set_decipher(decipher_fn)
 
-    -- 6. Collect all objects and write clean PDF
+    -- 7. Collect all objects and write clean PDF
     --    This matches ineptpdf.py PDFSerializer.dump():
     --    - Iterate all objids from xrefs
     --    - Skip the Encrypt dict object
@@ -247,7 +445,7 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey)
 
     logger.info("[ACSM] pdf: decrypted", decryptCount, "objects,", streamCount, "streams")
 
-    -- 7. Build clean trailer (remove /Encrypt, /Prev, /XRefStm)
+    -- 8. Build clean trailer (remove /Encrypt, /Prev, /XRefStm)
     local cleanTrailer = doc:getCleanTrailer()
     cleanTrailer.Size = cleanTrailer.Size or (maxId + 1)
 

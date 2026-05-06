@@ -124,6 +124,24 @@ function zlib.rawInflater()
         return nil, "inflateInit2 failed: " .. tostring(rc)
     end
 
+    local function build_inflater()
+        return _buildInflater(stream)
+    end
+    return build_inflater()
+end
+
+--- Create a streaming zlib inflater (handles zlib header, not raw deflate).
+function zlib.inflater()
+    local stream = ffi.new("z_stream[1]")
+    local rc = libz.inflateInit2_(stream, 15, libz.zlibVersion(), ffi.sizeof(stream[0]))
+    if rc ~= Z_OK then
+        return nil, "inflateInit2 failed: " .. tostring(rc)
+    end
+    return _buildInflater(stream)
+end
+
+function _buildInflater(stream)
+
     local outbuf = ffi.new("uint8_t[?]", CHUNK_SIZE)
     local finished = false
 
@@ -169,6 +187,8 @@ function zlib.rawInflater()
         end
         finished = true
     end
+
+    inflater.close = inflater.finalize
 
     return inflater
 end

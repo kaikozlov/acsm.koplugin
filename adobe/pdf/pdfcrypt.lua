@@ -94,20 +94,19 @@ function pdfcrypt.determineEncryption(bookKey, ebx_V, ebx_type, length)
         V = (ebx_V == 3) and 3 or 2
     end
 
+    -- EBX_HANDLER (ADEPT) always uses RC4 regardless of V.
+    -- This matches ineptpdf.py initialize_ebx_inept lines 1757-1759:
+    --   self.genkey = self.genkey_v3 if V == 3 else self.genkey_v2
+    --   self.decipher = self.decrypt_rc4
+    -- genkey_v4/genkey_v5 and AES are only used by Standard encryption,
+    -- never by ADEPT.
     local genkey, cipher
-    if V == 5 then
-        genkey = pdfcrypt.genkey_v5
-        cipher = "aes256"
-    elseif V == 4 then
-        genkey = pdfcrypt.genkey_v4
-        cipher = "aes"
-    elseif V == 3 then
+    if V == 3 then
         genkey = pdfcrypt.genkey_v3
-        cipher = "rc4"
     else
         genkey = pdfcrypt.genkey_v2
-        cipher = "rc4"
     end
+    cipher = "rc4"
 
     return {
         genkey = genkey,
@@ -118,30 +117,38 @@ function pdfcrypt.determineEncryption(bookKey, ebx_V, ebx_type, length)
 end
 
 --- Remove ADEPT hardening (RMSDK >= 10, keyType > 2).
--- @param bookKey string encrypted book key
+-- @param bookKey string encrypted book key (base64-decoded, pre-RSA-decrypt)
 -- @param keyType string keyType attribute value from encryptedKey element
 -- @param resourceUUID string resource UUID
 -- @param deviceUUID string device UUID
 -- @param fulfillmentUUID string fulfillment UUID (first 36 chars)
--- @param aesDecrypt function(key, iv, data) -> decrypted data
--- @return string unhardened book key
+-- @param aesDecrypt function(key, iv, data, no_padding) -> decrypted data
+-- @return string unhardened book key (still RSA-encrypted), or nil
 function pdfcrypt.removeHardening(bookKey, keyType, resourceUUID, deviceUUID, fulfillmentUUID, aesDecrypt)
-    -- Parse UUIDs to 16-byte integers
-    local function uuidToInt(str)
+    -- Parse a UUID hex string to 16 raw bytes.
+    -- Matches Python's UUID.int → UUID.bytes (both big-endian for the IV).
+    -- We do byte-level XOR instead of 64-bit integer XOR to avoid
+    -- Lua double precision loss (53-bit mantissa < 64-bit UUID half).
+    local function uuidToBytes(str)
         str = str:gsub("-", "")
-        return tonumber(str:sub(1, 16), 16), tonumber(str:sub(17, 32), 16)
+        local bytes = {}
+        for i = 1, 32, 2 do
+            bytes[#bytes + 1] = string.char(tonumber(str:sub(i, i+1), 16))
+        end
+        return table.concat(bytes)
     end
 
-    local rHi, rLo = uuidToInt(resourceUUID)
-    local dHi, dLo = uuidToInt(deviceUUID)
-    local fHi, fLo = uuidToInt(fulfillmentUUID)
+    -- XOR three UUIDs byte-by-byte to derive the IV.
+    -- Equivalent to Python: UUID(int=resourceuuid.int ^ deviceuuid.int ^ fullfillmentuuid.int).bytes
+    local rBytes = uuidToBytes(resourceUUID)
+    local dBytes = uuidToBytes(deviceUUID)
+    local fBytes = uuidToBytes(fulfillmentUUID)
 
-    -- XOR to derive IV
-    local ivHi = bit.bxor(rHi, bit.bxor(dHi, fHi))
-    local ivLo = bit.bxor(rLo, bit.bxor(dLo, fLo))
-
-    -- Pack IV as 16 bytes big-endian
-    local iv = string.pack(">II", ivHi, ivLo)
+    local ivParts = {}
+    for i = 1, 16 do
+        ivParts[i] = string.char(bit.bxor(rBytes:byte(i), bit.bxor(dBytes:byte(i), fBytes:byte(i))))
+    end
+    local iv = table.concat(ivParts)
 
     -- Derive KEK from keyType
     local rem = tonumber(keyType) % 16
@@ -149,10 +156,12 @@ function pdfcrypt.removeHardening(bookKey, keyType, resourceUUID, deviceUUID, fu
 
     local kek = Hbytes:sub(2 * rem + 1, 16 + rem) .. Hbytes:sub(rem + 1, 2 * rem)
 
-    -- AES-CBC decrypt with PKCS7 unpad
-    local decrypted = aesDecrypt(kek, iv, bookKey)
-    -- Remove PKCS7 padding
-    if decrypted and #decrypted > 0 then
+    -- AES-CBC decrypt (matches Python: AES.new(kek, AES.MODE_CBC, kekiv).decrypt(keydata))
+    -- no_padding=true because we handle PKCS7 unpad ourselves (matching Python's unpad())
+    local decrypted = aesDecrypt(kek, iv, bookKey, true)
+    if not decrypted then return nil end
+    -- Remove PKCS7 padding (Python unpad from ineptpdf.py)
+    if #decrypted > 0 then
         local padLen = decrypted:byte(#decrypted)
         if padLen > 0 and padLen <= 16 then
             decrypted = decrypted:sub(1, #decrypted - padLen)
