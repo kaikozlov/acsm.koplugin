@@ -93,11 +93,9 @@ local function extractRights(doc, encParam)
         return nil, "Failed to base64-decode ADEPT_LICENSE"
     end
 
-    local inflater = zlib.rawInflater()
-    local rights_xml = inflater:update(compressed)
-    inflater:close()
+    local rights_xml, infErr = zlib.inflateRaw(compressed)
     if not rights_xml or #rights_xml == 0 then
-        return nil, "Failed to decompress ADEPT_LICENSE"
+        return nil, "Failed to decompress ADEPT_LICENSE" .. (infErr and (": " .. infErr) or "")
     end
 
     local rights = xml.deserialize(rights_xml)
@@ -465,5 +463,13 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey, licenseKey, fulfill
         decryptedStreams = streamCount,
     }
 end
+
+-- Export internal functions for testing (underscore-prefixed = internal API)
+pdf._extractRights = extractRights
+pdf._findRightsText = findRightsText
+pdf._extractEncryptedKey = extractEncryptedKey
+pdf._extractBookKey = extractBookKey
+pdf._make_rc4_decipher = make_rc4_decipher
+pdf._make_aes_decipher = make_aes_decipher
 
 return pdf
