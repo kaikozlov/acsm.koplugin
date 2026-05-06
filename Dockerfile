@@ -16,7 +16,7 @@ ARG KOREADER_VERSION=v2026.03
 # Architecture: x86_64 (Intel/AMD) or arm64 (Apple Silicon / Graviton)
 ARG ARCH=arm64
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ARG KOREADER_VERSION
 ARG ARCH
@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     xz-utils \
     libc6-dev \
-    libssl3 \
+    libssl3t64 \
     lua-busted \
     && rm -rf /var/lib/apt/lists/*
 
