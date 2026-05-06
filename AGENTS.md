@@ -52,9 +52,33 @@ All specs live under `spec/` and run together via `busted-koreader`:
 The only tag in use is `#e2e` — `make test` excludes it because it hits
 Adobe's servers and needs network access.
 
+### E2E tests
+
+The e2e suite (`spec/integration/e2e_spec.lua`) hits **real Adobe Content
+Server** end-to-end. It exercises the entire pipeline that a user would go
+through:
+
+1. Download a real `.acsm` from Adobe's free sample library
+2. Anonymous sign-in via `adobe.signIn`
+3. Device activation via `adobe.activate`
+4. Fulfillment: ACSM → encrypted EPUB download
+5. Decryption: remove Adobe DRM, produce a valid EPUB
+
+The test uses Adobe's smallest free sample ("God Is A Salesman" chapter 1,
+~100 KB) to minimize download time. It validates the output is a real EPUB
+(PK zip header) and that decryption produced >0 entries.
+
+```bash
+make test-e2e   # must have network; Docker needs --network=host on some setups
+```
+
+No credentials or configuration are needed — anonymous sign-in works for
+free samples. If Adobe's servers are down or rate-limiting, the test will
+fail with a network or HTTP error.
+
 ### How it works
 
-- **Image**: `ubuntu:22.04` + KOReader Linux release + `lua-busted` (apt).
+- **Image**: `ubuntu:24.04` + KOReader Linux release + `lua-busted` (apt).
 - **KOReader**: extracted to `/opt/lib/koreader/`, includes bundled `luajit`.
 - **Plugin**: bind-mounted at `/opt/acsm.koplugin`, symlinked into KOReader's
   plugins dir so `PluginLoader:_discover()` finds it.
@@ -84,6 +108,47 @@ files that any Lua 5.1-compatible interpreter (including LuaJIT) can load.
 - `.dockerignore` — keeps `REFERENCE/`, `.git/`, build artifacts out of context
 - `spec/commonrequire.lua` — headless KOReader bootstrap (busted helper)
 - `spec/integration/fixtures/` — test fixtures (sample ACSM, etc.)
+- `adobe/util/adobehash.lua` — extracted hash buffer construction (testable separately from fulfillment)
+
+### Test coverage overview
+
+161 tests total (excluding e2e). Key areas:
+
+| Area | Spec file | Tests |
+|---|---|---|
+| ASN.1 encoding + signing | `integration/signing_spec.lua` | 22 (10 byte-level, 3 pipeline, 9 negative) |
+| Adobe hash buffer + digest | `integration/hashbuffer_spec.lua` | 11 |
+| XML request builders | `integration/xml_builders_spec.lua` | 6 |
+| Crypto round-trips | `integration/crypto_spec.lua` | 5 |
+| DOM parse/serialize round-trip | `integration/dom_spec.lua` | 10 |
+| EPUB decryption pipeline | `integration/epub_spec.lua` | 7 |
+| Fulfillment flow (stubbed HTTP) | `integration/fulfillment_flow_spec.lua` | 7 |
+| Plugin lifecycle | `integration/plugin_lifecycle_spec.lua` | 14 |
+| Module loading | `integration/module_loading_spec.lua` | 11 |
+| Naming utilities | `integration/naming_spec.lua` + `naming_spec.lua` | 13 |
+| zlib inflate round-trip | `integration/zlib_spec.lua` | 10 |
+| EPUB internals | `epub_spec.lua` | 7 |
+| Fulfillment smoke | `fulfillment_spec.lua` | 1 |
+| E2E (Adobe servers) | `integration/e2e_spec.lua` | 2 |
+
+### Key API note: crypto.key wrapper vs raw PKey
+
+`crypto.key.new()` returns a **wrapper** with `.pkey` holding the raw
+`nativecrypto.PKey` object. The wrapper only exposes construction and
+DER export (`topkcs8`). All signing/encryption/decryption methods
+(`sign_raw`, `encrypt`, `decrypt`) live on the raw PKey.
+
+Callers must use `.pkey` when passing to functions that sign:
+
+```lua
+local key = crypto.key.new()
+local sig = crypto.signXML("name", key.pkey, { ... })  -- correct
+local sig = crypto.signXML("name", key, { ... })       -- ERROR: no sign_raw
+```
+
+This is consistent with all real call sites (`adobe.activate`,
+`fulfillment.process`) which receive raw PKeys from `crypto.decodepkcs12`
+(which returns `decoded.key` — already raw).
 
 ### Reference
 
