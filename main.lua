@@ -310,6 +310,36 @@ function ACSM:clearActivation()
     self:saveSettings()
 end
 
+--- Delete all plugin settings and cached data.
+-- Called by PluginLoader when the user chooses "Also delete plugin settings"
+-- while deleting the plugin from the Plugin Management menu.
+-- Removes the settings file, cache directory, and resets in-memory state.
+function ACSM:deletePluginSettings()
+    logger.info("[ACSM] deletePluginSettings: removing all plugin data")
+
+    -- Purge the cache directory (fulfillment map + temp files)
+    local cache_dir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
+    if util.pathExists(cache_dir) then
+        local ok, err = ffiUtil.purgeDir(cache_dir)
+        if not ok then
+            logger.warn("[ACSM] deletePluginSettings: failed to remove cache dir:", err)
+        end
+    end
+
+    -- Delete the settings file
+    if util.pathExists(self.settings_file) then
+        local ok, err = os.remove(self.settings_file)
+        if not ok then
+            logger.warn("[ACSM] deletePluginSettings: failed to remove settings file:", err)
+        end
+    end
+
+    -- Reset in-memory state
+    self.settings = nil
+    self.activation_blob = nil
+    self._fulfillment_map = nil
+end
+
 function ACSM:restoreActivation()
     self:loadSettings()
     if not self.activation_blob then

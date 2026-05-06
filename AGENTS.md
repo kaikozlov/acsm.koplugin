@@ -112,7 +112,7 @@ files that any Lua 5.1-compatible interpreter (including LuaJIT) can load.
 
 ### Test coverage overview
 
-161 tests total (excluding e2e). Key areas:
+173 tests total (excluding e2e). Key areas:
 
 | Area | Spec file | Tests |
 |---|---|---|
@@ -129,6 +129,7 @@ files that any Lua 5.1-compatible interpreter (including LuaJIT) can load.
 | zlib inflate round-trip | `integration/zlib_spec.lua` | 10 |
 | EPUB internals | `epub_spec.lua` | 7 |
 | Fulfillment smoke | `fulfillment_spec.lua` | 1 |
+| deletePluginSettings hook | `integration/delete_settings_spec.lua` | 12 |
 | E2E (Adobe servers) | `integration/e2e_spec.lua` | 2 |
 
 ### Key API note: crypto.key wrapper vs raw PKey
@@ -150,9 +151,44 @@ This is consistent with all real call sites (`adobe.activate`,
 `fulfillment.process`) which receive raw PKeys from `crypto.decodepkcs12`
 (which returns `decoded.key` — already raw).
 
+---
+
+## Plugin Cleanup: `deletePluginSettings()`
+
+KOReader's Plugin Manager (v2026.03+) lets users delete plugins via long-press.
+A checkbox "Also delete plugin settings" appears; it is **grayed out** unless the
+plugin implements `deletePluginSettings()` on its instance. PluginLoader calls it
+via `pcall(fn, instance)` — no parameters, no return value needed.
+
+### What to clean up
+
+Our `deletePluginSettings()` must remove **all** persistent state the plugin
+creates. Currently that is:
+
+| On-disk path | Type | Content |
+|---|---|---|
+| `settings/acsm.lua` | LuaSettings file | `activation`, `reuse_existing`, `open_after_download` |
+| `cache/acsm.koplugin/` | Directory | `fulfillment_map.lua` + temp fulfillment/epub work files |
+
+**No `G_reader_settings` keys are used** — all state is in the plugin's own files.
+
+(There are also Android-only side effects copying system `.so` files into the
+app data directory, but those are shared system libraries, not plugin state.)
+
+### Adding new persistent state
+
+When adding any new file, directory, or `G_reader_settings` key, you **must**
+also add its cleanup to `ACSM:deletePluginSettings()` in `main.lua` and add a
+test to `spec/integration/delete_settings_spec.lua`.
+
+The test file uses isolated temp directories — each test creates its own,
+and cleans up at the end.
+
 ### Reference
 
 - `REFERENCE/koreader/spec/unit/commonrequire.lua` — the upstream pattern
+- koreader/koreader#15240 — PR that added `deletePluginSettings` to PluginLoader
+- koreader/koreader#15245 — follow-up separating built-in vs user plugins
 
 
 

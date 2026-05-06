@@ -150,6 +150,22 @@ describe("ACSM plugin lifecycle", function()
             assert.is.truthy(path:match("^/books/"))
         end)
 
+        it("derives title-based name from URLLink.acsm (Overdrive-style)", function()
+            local main = dofile(plugin_path .. "/main.lua")
+            local meta = { title = "Great Expectations" }
+            local path = main.deriveOutputPath(main, "/books/URLLink.acsm", meta)
+            assert.are.equal("/books/Great Expectations.epub", path)
+        end)
+
+        it("derives title-based name from sample.acsm fixture end-to-end", function()
+            local main = dofile(plugin_path .. "/main.lua")
+            local fixture_path = plugin_path .. "/spec/integration/fixtures/sample.acsm"
+            local meta = main.parseAcsmMetadata(main, fixture_path)
+            assert.is.truthy(meta.title)
+            local path = main.deriveOutputPath(main, "/downloads/URLLink.acsm", meta)
+            assert.are.equal("/downloads/The Adventures of Sherlock Holmes.epub", path)
+        end)
+
         it("falls back to acsm filename when no title", function()
             local main = dofile(plugin_path .. "/main.lua")
             local path = main.deriveOutputPath(main, "/books/my-loan.acsm", nil)
