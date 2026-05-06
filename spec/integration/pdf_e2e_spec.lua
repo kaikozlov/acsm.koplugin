@@ -143,25 +143,55 @@ describe("End-to-end PDF fulfillment #e2e", function()
         assert.is_true(#objids > 0, "Output PDF has no objects")
 
         -- The output should NOT have an /Encrypt dictionary
-        -- (we strip it during decryption)
         assert.is.falsy(outDoc.encryption, "Output PDF still has /Encrypt dict — decryption didn't strip it")
 
-        -- Count objects: should have a reasonable number for a 47KB PDF
+        -- Load all objects and verify stream content is valid
         local loaded = 0
         local streams = 0
+        local stream_decode_errors = 0
+        local zlib_mod = require("adobe.util.zlib")
         for _, objid in ipairs(objids) do
             local obj = outDoc:getobj(objid)
             if obj then
                 loaded = loaded + 1
                 if type(obj) == "table" and obj.dic and obj.rawdata then
                     streams = streams + 1
+                    -- Verify stream decryption produced valid content:
+                    -- Decrypted streams should decompress without error
+                    -- (or at minimum the raw data should be non-empty).
+                    local ok, decdata = pcall(obj.get_decdata, obj)
+                    if ok and decdata and #decdata > 0 then
+                        -- If the stream has FlateDecode, verify it decompresses
+                        local filter = obj.dic.Filter or obj.dic["filter"]
+                        if filter and tostring(filter) == "FlateDecode" then
+                            local inflater = zlib_mod.inflater()
+                            local parts = {}
+                            local decomp_ok, decomp_err = inflater:update(
+                                decdata, #decdata, function(ptr, len)
+                                    parts[#parts + 1] = require("ffi").string(ptr, len)
+                                end)
+                            inflater:close()
+                            if not decomp_ok then
+                                stream_decode_errors = stream_decode_errors + 1
+                                print(string.format("[pdf-e2e] WARNING: stream %d failed to decompress: %s",
+                                    objid, tostring(decomp_err)))
+                            end
+                        end
+                    else
+                        stream_decode_errors = stream_decode_errors + 1
+                    end
                 end
             end
         end
         assert.is_true(loaded > 3, "Output PDF has too few objects: " .. loaded)
         assert.is_true(streams > 0, "Output PDF has no stream objects")
+        -- CRITICAL: no stream should fail to decrypt/decompress
+        if stream_decode_errors > 0 then
+            error(string.format("Output PDF has %d streams that failed decryption/decompression",
+                stream_decode_errors))
+        end
 
-        print(string.format("[pdf-e2e] Success! Output PDF: %d bytes, %d objects (%d streams)",
+        print(string.format("[pdf-e2e] Success! Output PDF: %d bytes, %d objects (%d streams, 0 corrupt)",
             attr.size, loaded, streams))
 
         outDoc:close()

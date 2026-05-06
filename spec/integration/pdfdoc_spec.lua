@@ -103,6 +103,13 @@ describe("PDFDocument", function()
 
         local ids = doc:allObjids()
         assert.is_truthy(#ids >= 2, "should have at least 2 objects (catalog + pages)")
+        -- Verify specific IDs exist
+        local seen = {}
+        for _, id in ipairs(ids) do seen[id] = true end
+        assert.is_truthy(seen[1], "object 1 (catalog) should be in objids")
+        assert.is_truthy(seen[2], "object 2 (pages) should be in objids")
+        -- Object 0 should NEVER be returned (it's reserved/free)
+        assert.is_falsy(seen[0], "object 0 should not appear in objids")
         doc:close()
     end)
 
