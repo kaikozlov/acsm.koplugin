@@ -284,6 +284,7 @@ end
 
 local PDFXRefStream = {}
 PDFXRefStream.__index = PDFXRefStream
+pdfdoc.PDFXRefStream = PDFXRefStream
 
 function PDFXRefStream:new()
     return setmetatable({
