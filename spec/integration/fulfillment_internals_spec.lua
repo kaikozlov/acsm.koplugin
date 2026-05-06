@@ -171,24 +171,29 @@ describe("Fulfillment internals", function()
 </fulfillmentToken>]]
             koutil.writeToFile(acsmContent, acsmPath)
 
-            -- Stub HTTP to return a canned fulfillment response
+            -- Stub HTTP to return a canned fulfillment response.
+            -- Real Adobe responses wrap fulfillmentResult in <envelope>.
+            -- Without the wrapper, dom.parse returns fulfillmentResult
+            -- directly and findDescendant can't find it as its own child.
             local http = require("socket.http")
             http.request = function(req)
                 if req.sink then
                     local respXml = [[<?xml version="1.0"?>
-<adept:fulfillmentResult xmlns:adept="http://ns.adobe.com/adept">
-  <adept:resourceItemInfo>
-    <adept:src>https://test.example.com/download/book.epub</adept:src>
-    <adept:licenseToken>
-      <adept:encryptedKey>dGVzdGtleQ==</adept:encryptedKey>
-      <adept:keyType>2</adept:keyType>
-      <adept:licenseURL>https://test.example.com/license</adept:licenseURL>
-    </adept:licenseToken>
-  </adept:resourceItemInfo>
-  <adept:notify>
-    <adept:notifyURL>https://test.example.com/notify</adept:notifyURL>
-  </adept:notify>
-</adept:fulfillmentResult>]]
+<envelope>
+<fulfillmentResult xmlns="http://ns.adobe.com/adept">
+  <resourceItemInfo>
+    <src>https://test.example.com/download/book.epub</src>
+    <licenseToken>
+      <encryptedKey>dGVzdGtleQ==</encryptedKey>
+      <keyType>2</keyType>
+      <licenseURL>https://test.example.com/license</licenseURL>
+    </licenseToken>
+  </resourceItemInfo>
+  <notify>
+    <notifyURL>https://test.example.com/notify</notifyURL>
+  </notify>
+</fulfillmentResult>
+</envelope>]]
                     req.sink(respXml)
                     req.sink(nil)
                 end
