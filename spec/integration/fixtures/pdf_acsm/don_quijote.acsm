@@ -1,0 +1,26 @@
+<fulfillmentToken fulfillmentType="free" auth="user" xmlns="http://ns.adobe.com/adept">
+  <distributor>urn:uuid:b4e1303f-630f-4769-9c82-4dea6d65a277</distributor>
+  <operatorURL>https://contentserver.stage.dtsbytebooks.com/stage/fulfillment</operatorURL>
+  <transaction>ec9001c0-5237-458c-94c4-95c5b5bc2e1f-000001da</transaction>
+  <purchase>2026-05-06T07:03:32+00:00</purchase>
+  <expiration>2026-05-06T08:03:32+00:00</expiration>
+  <resourceItemInfo>
+    <resource>urn:uuid:39a50f6e-fb34-4c8e-82fd-7b38630604d4</resource>
+    <resourceItem>1</resourceItem>
+    <metadata>
+      <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">El ingenioso hidalgo Don Quijote de la Mancha</dc:title>
+      <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Cervantes, Miguel</dc:creator>
+      <dc:format xmlns:dc="http://purl.org/dc/elements/1.1/">application/pdf</dc:format>
+    </metadata>
+    <licenseToken>
+      <resource>urn:uuid:39a50f6e-fb34-4c8e-82fd-7b38630604d4</resource>
+      <permissions>
+        <display/>
+        <excerpt/>
+        <print/>
+        <play/>
+      </permissions>
+    </licenseToken>
+  </resourceItemInfo>
+  <hmac>RBsVfLJPTw0n2VNCljtHuvH6los=</hmac>
+</fulfillmentToken>

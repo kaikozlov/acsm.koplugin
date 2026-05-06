@@ -3,5 +3,6 @@ build/
 .luajitrocks/
 .luarocks/
 dist/
-.epub
-.pdf
+*.epub
+*.pdf
+tools/batch_output/

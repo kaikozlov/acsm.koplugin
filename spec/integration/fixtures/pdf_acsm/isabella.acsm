@@ -1,0 +1,26 @@
+<fulfillmentToken fulfillmentType="free" auth="user" xmlns="http://ns.adobe.com/adept">
+  <distributor>urn:uuid:b4e1303f-630f-4769-9c82-4dea6d65a277</distributor>
+  <operatorURL>https://contentserver.stage.dtsbytebooks.com/stage/fulfillment</operatorURL>
+  <transaction>ec9001c0-5237-458c-94c4-95c5b5bc2e1f-000001d9</transaction>
+  <purchase>2026-05-06T07:03:32+00:00</purchase>
+  <expiration>2026-05-06T08:03:32+00:00</expiration>
+  <resourceItemInfo>
+    <resource>urn:uuid:9a93a7eb-a594-4e39-ae4f-496973a182a0</resource>
+    <resourceItem>1</resourceItem>
+    <metadata>
+      <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Isabella von Aegypten</dc:title>
+      <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">von Arnim, Achim</dc:creator>
+      <dc:format xmlns:dc="http://purl.org/dc/elements/1.1/">application/pdf</dc:format>
+    </metadata>
+    <licenseToken>
+      <resource>urn:uuid:9a93a7eb-a594-4e39-ae4f-496973a182a0</resource>
+      <permissions>
+        <display/>
+        <excerpt/>
+        <print/>
+        <play/>
+      </permissions>
+    </licenseToken>
+  </resourceItemInfo>
+  <hmac>uCqv39WYPYQtIfM8V3+5c3C1aPc=</hmac>
+</fulfillmentToken>

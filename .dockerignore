@@ -11,3 +11,4 @@ build/
 node_modules/
 test/headless*
 test-results.xml
+tools/batch_output/

@@ -1,0 +1,26 @@
+<fulfillmentToken fulfillmentType="free" auth="user" xmlns="http://ns.adobe.com/adept">
+  <distributor>urn:uuid:b4e1303f-630f-4769-9c82-4dea6d65a277</distributor>
+  <operatorURL>https://contentserver.stage.dtsbytebooks.com/stage/fulfillment</operatorURL>
+  <transaction>ec9001c0-5237-458c-94c4-95c5b5bc2e1f-000001d8</transaction>
+  <purchase>2026-05-06T07:03:32+00:00</purchase>
+  <expiration>2026-05-06T08:03:32+00:00</expiration>
+  <resourceItemInfo>
+    <resource>urn:uuid:bb099fd5-0f50-4224-8c19-6f3c081b02a4</resource>
+    <resourceItem>1</resourceItem>
+    <metadata>
+      <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Boule de Suif</dc:title>
+      <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Maupassant, Guy de</dc:creator>
+      <dc:format xmlns:dc="http://purl.org/dc/elements/1.1/">application/pdf</dc:format>
+    </metadata>
+    <licenseToken>
+      <resource>urn:uuid:bb099fd5-0f50-4224-8c19-6f3c081b02a4</resource>
+      <permissions>
+        <display/>
+        <excerpt/>
+        <print/>
+        <play/>
+      </permissions>
+    </licenseToken>
+  </resourceItemInfo>
+  <hmac>FNkM0XZ0raYu8bFtNrlDHsFURVo=</hmac>
+</fulfillmentToken>

@@ -1,0 +1,26 @@
+<fulfillmentToken fulfillmentType="free" auth="user" xmlns="http://ns.adobe.com/adept">
+  <distributor>urn:uuid:b4e1303f-630f-4769-9c82-4dea6d65a277</distributor>
+  <operatorURL>https://contentserver.stage.dtsbytebooks.com/stage/fulfillment</operatorURL>
+  <transaction>ec9001c0-5237-458c-94c4-95c5b5bc2e1f-000001d1</transaction>
+  <purchase>2026-05-06T07:03:30+00:00</purchase>
+  <expiration>2026-05-06T08:03:30+00:00</expiration>
+  <resourceItemInfo>
+    <resource>urn:uuid:115ab68e-be42-42bb-99a9-d15168879e30</resource>
+    <resourceItem>1</resourceItem>
+    <metadata>
+      <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">The Goodbye Summer</dc:title>
+      <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Patricia Gaffney</dc:creator>
+      <dc:format xmlns:dc="http://purl.org/dc/elements/1.1/">application/pdf</dc:format>
+    </metadata>
+    <licenseToken>
+      <resource>urn:uuid:115ab68e-be42-42bb-99a9-d15168879e30</resource>
+      <permissions>
+        <display/>
+        <excerpt/>
+        <print/>
+        <play/>
+      </permissions>
+    </licenseToken>
+  </resourceItemInfo>
+  <hmac>FhFLWDP1gdmi2suS8djbSBLFFms=</hmac>
+</fulfillmentToken>
