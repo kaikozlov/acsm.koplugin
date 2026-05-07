@@ -527,4 +527,8 @@ function ACSM:openFile(file)
     end)
 end
 
+-- Underscore exports for testing (local functions)
+ACSM._isActivationError = isActivationError
+ACSM._trimError = trimError
+
 return ACSM
