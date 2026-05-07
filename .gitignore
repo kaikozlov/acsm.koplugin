@@ -3,6 +3,8 @@ build/
 .luajitrocks/
 .luarocks/
 dist/
+tools/batch_output/
+
 *.epub
 *.pdf
-tools/batch_output/
+*.acsm
