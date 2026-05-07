@@ -288,66 +288,66 @@ function PDFSerializer:serialize_indirect(objid, obj)
 end
 
 ------------------------------------------------------------------------
--- Public API
+-- PdfWriter: streaming writer that serializes one object at a time.
+-- Memory discipline: the caller feeds objects one at a time and releases
+-- them after writeObject() returns. Peak memory is bounded to the size
+-- of the largest single object — never the sum of all objects.
+--
+-- This is the "single source of truth" for writing clean PDFs.
+-- Both the production decrypt path (pdf.lua) and the convenience
+-- writeCleanPdf() wrapper use this class.
 ------------------------------------------------------------------------
 
---- Serialize a PDF object to a string (convenience for tests).
-function writer.serializeObject(obj)
-    local buf = {}
-    local ser = PDFSerializer.new({
-        write = function(_, data) buf[#buf + 1] = data end,
-        seek = function() return 0 end,
-    })
-    ser:serialize_object(obj)
-    return table.concat(buf)
-end
+local PdfWriter = {}
+PdfWriter.__index = PdfWriter
+writer.PdfWriter = PdfWriter
 
---- Write a clean unencrypted PDF.
--- Matches ineptpdf.py PDFSerializer.dump() (non-xref-stm path).
-function writer.writeCleanPdf(inPath, outPath, doc, encrypt_objid)
-    local out, err = io.open(outPath, "wb")
+--- Create a new streaming PDF writer.
+-- @param outputPath string path to the output PDF file
+-- @param opts table with:
+--   version: PDF header (default "%PDF-1.4")
+-- @return PdfWriter instance, or nil + error
+function PdfWriter.new(outputPath, opts)
+    opts = opts or {}
+    local out, err = io.open(outputPath, "wb")
     if not out then
-        error("Cannot open output file: " .. outPath .. ": " .. tostring(err))
+        return nil, "Cannot open output file: " .. outputPath .. ": " .. tostring(err)
     end
 
     local ser = PDFSerializer.new(out)
 
-    -- Write header
-    ser:write(doc.version)
+    -- Write header immediately
+    ser:write(opts.version or "%PDF-1.4")
     ser:write("\n%\xe2\xe3\xcf\xd3\n")
 
-    -- Collect object IDs, excluding Encrypt dict
-    local objids = {}
-    local maxobj = 0
-    for objid, _ in pairs(doc.objects) do
-        if objid ~= encrypt_objid then
-            objids[#objids + 1] = objid
-            if objid > maxobj then maxobj = objid end
-        end
-    end
-    table.sort(objids)
+    return setmetatable({
+        _out = out,
+        _ser = ser,
+        _xrefs = {},
+        _maxId = 0,
+        _count = 0,
+    }, PdfWriter)
+end
 
+--- Write a single object. After this returns, the caller may release
+-- the object reference — the writer holds no reference to it.
+-- @param objid number the object ID
+-- @param obj table the parsed/decrypted PDF object
+function PdfWriter:writeObject(objid, obj)
+    self._xrefs[objid] = self._ser:tell()
+    self._ser:serialize_indirect(objid, obj)
+    if objid > self._maxId then self._maxId = objid end
+    self._count = self._count + 1
+end
+
+--- Finish the PDF: write xref table, trailer, and close the file.
+-- @param trailer table the clean trailer dictionary
+function PdfWriter:finish(trailer)
+    local out = self._out
+    local ser = self._ser
+    local xrefs = self._xrefs
+    local maxobj = self._maxId
     local size = maxobj + 1
-
-    -- Write each object, recording byte offsets for xref
-    local xrefs = {}
-
-    if doc.xref_entries then
-        for k, _ in pairs(doc.xref_entries) do
-            doc.xref_entries[k] = nil
-        end
-    end
-
-    for _, objid in ipairs(objids) do
-        local obj = doc.objects[objid]
-        xrefs[objid] = ser:tell()
-
-        if doc.xref_entries then
-            doc.xref_entries[objid] = { offset = xrefs[objid], genno = 0 }
-        end
-
-        ser:serialize_indirect(objid, obj)
-    end
 
     -- Cross-reference table
     local startxref = ser:tell()
@@ -363,19 +363,79 @@ function writer.writeCleanPdf(inPath, outPath, doc, encrypt_objid)
     end
 
     -- Trailer
-    local trailer = {}
-    for k, v in pairs(doc.trailer) do
+    local clean = {}
+    for k, v in pairs(trailer) do
         if k ~= "Encrypt" then
-            trailer[k] = v
+            clean[k] = v
         end
     end
-    trailer.Size = size
+    clean.Size = size
 
     out:write("trailer\n")
-    ser:serialize_object(trailer)
+    ser:serialize_object(clean)
     out:write(string.format("\nstartxref\n%d\n%%%%EOF\n", startxref))
 
     out:close()
+    self._out = nil
+end
+
+--- Get the number of objects written so far.
+function PdfWriter:objectCount()
+    return self._count
+end
+
+------------------------------------------------------------------------
+-- Public API
+------------------------------------------------------------------------
+
+--- Serialize a PDF object to a string (convenience for tests).
+function writer.serializeObject(obj)
+    local buf = {}
+    local ser = PDFSerializer.new({
+        write = function(_, data) buf[#buf + 1] = data end,
+        seek = function() return 0 end,
+    })
+    ser:serialize_object(obj)
+    return table.concat(buf)
+end
+
+--- Write a clean unencrypted PDF from a pre-built document table.
+-- This is a convenience wrapper around PdfWriter for tests and simple
+-- use cases. For production decrypt paths, use PdfWriter directly to
+-- avoid accumulating all objects in memory.
+--
+-- @param inPath string (unused, kept for backward compatibility)
+-- @param outPath string output file path
+-- @param doc table with .version, .trailer, .objects, optional .xref_entries
+-- @param encrypt_objid number|nil object ID to skip
+function writer.writeCleanPdf(inPath, outPath, doc, encrypt_objid)
+    local w, err = PdfWriter.new(outPath, { version = doc.version })
+    if not w then error(err) end
+
+    -- Collect and sort object IDs
+    local objids = {}
+    for objid, _ in pairs(doc.objects) do
+        if objid ~= encrypt_objid then
+            objids[#objids + 1] = objid
+        end
+    end
+    table.sort(objids)
+
+    -- Write objects (xref_entries bookkeeping for legacy callers)
+    if doc.xref_entries then
+        for k, _ in pairs(doc.xref_entries) do
+            doc.xref_entries[k] = nil
+        end
+    end
+
+    for _, objid in ipairs(objids) do
+        w:writeObject(objid, doc.objects[objid])
+        if doc.xref_entries then
+            doc.xref_entries[objid] = { offset = w._xrefs[objid], genno = 0 }
+        end
+    end
+
+    w:finish(doc.trailer)
 end
 
 return writer

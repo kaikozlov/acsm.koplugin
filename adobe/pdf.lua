@@ -409,50 +409,53 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey, licenseKey, fulfill
     end
     doc:set_decipher(decipher_fn)
 
-    -- 7. Collect all objects and write clean PDF
-    --    This matches ineptpdf.py PDFSerializer.dump():
-    --    - Iterate all objids from xrefs
-    --    - Skip the Encrypt dict object
-    --    - For each object, call doc:getobj() which transparently decrypts
-    --    - Streams use get_decdata()/get_decdic()
+    -- 7+8. Stream objects to output one at a time.
+    --    Memory discipline: each object is loaded (decrypted), written to
+    --    the output file, then released from the cache so GC can reclaim it.
+    --    Peak memory: bounded to the largest single object, not their sum.
+    --    This matches the EPUB streaming approach (64KB chunks per entry)
+    --    and prevents OOM kills on memory-constrained devices (Kindle PW1).
     local ids = doc:allObjids()
-    local cleanObjects = {}
-    local maxId = 0
+
+    local w, wErr = writer.PdfWriter.new(outputPath, {
+        version = doc.header or "%PDF-1.4",
+    })
+    if not w then
+        doc:close()
+        return nil, "Failed to open output: " .. tostring(wErr)
+    end
+
     local decryptCount = 0
     local streamCount = 0
 
     for _, objid in ipairs(ids) do
-        if objid > maxId then maxId = objid end
-
         -- Skip the Encrypt dict itself (ineptpdf.py removes it from trailer)
         if objid == doc.encrypt_objid then goto continue end
 
         local obj = doc:getobj(objid)
         if not obj then goto continue end
 
-        cleanObjects[objid] = obj
+        -- Write immediately — after this call, `obj` can be GC'd
+        w:writeObject(objid, obj)
         decryptCount = decryptCount + 1
 
         -- Count streams for diagnostics
-        if type(obj) == "table" and obj.dic ~= nil and obj.rawdata ~= nil then
+        if type(obj) == "table" and obj.dic ~= nil then
             streamCount = streamCount + 1
         end
+
+        -- Release from document cache so Lua can reclaim the memory.
+        -- The writer has already serialized everything to disk.
+        doc.objs[objid] = nil
 
         ::continue::
     end
 
     logger.info("[ACSM] pdf: decrypted", decryptCount, "objects,", streamCount, "streams")
 
-    -- 8. Build clean trailer (remove /Encrypt, /Prev, /XRefStm)
+    -- Finish: write xref table + trailer (remove /Encrypt, /Prev, /XRefStm)
     local cleanTrailer = doc:getCleanTrailer()
-    cleanTrailer.Size = cleanTrailer.Size or (maxId + 1)
-
-    local writeDoc = {
-        version = doc.header or "%PDF-1.4\n",
-        objects = cleanObjects,
-        trailer = cleanTrailer,
-    }
-    writer.writeCleanPdf(inputPath, outputPath, writeDoc, doc.encrypt_objid)
+    w:finish(cleanTrailer)
     logger.info("[ACSM] pdf: wrote clean PDF to", outputPath)
 
     doc:close()
