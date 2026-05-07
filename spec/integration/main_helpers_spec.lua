@@ -451,6 +451,142 @@ describe("main.lua helpers & orchestration", function()
     end)
 
     -- ================================================================
+    -- Fulfillment map culling
+    -- ================================================================
+    describe("saveFulfillmentMapping culling", function()
+        it("removes entries whose path no longer exists", function()
+            local main, tmp = loadInTmpDir("cull-stale")
+
+            local orig_getDataDir = DataStorage.getDataDir
+            DataStorage.getDataDir = function() return tmp end
+
+            -- Create a real file so its path survives culling
+            local real_file = tmp .. "/real-book.epub"
+            local f = io.open(real_file, "w"); f:write("epub"); f:close()
+
+            -- Save a stale entry (path never existed)
+            main:saveFulfillmentMapping("urn:uuid:stale", "/nonexistent/book.epub")
+            -- Save a live entry (file exists)
+            main:saveFulfillmentMapping("urn:uuid:live", real_file)
+
+            -- The stale entry should have been culled during the save above,
+            -- but the save that added it wouldn't cull itself since it runs
+            -- before the new entry is added. Let's do another save to trigger
+            -- culling of the previously-added stale entry.
+            main:saveFulfillmentMapping("urn:uuid:trigger", real_file)
+
+            assert.is_nil(main:lookupFulfillmentMapping("urn:uuid:stale"))
+            assert.are.equal(real_file, main:lookupFulfillmentMapping("urn:uuid:live"))
+
+            DataStorage.getDataDir = orig_getDataDir
+            rmTmpDir(tmp)
+        end)
+
+        it("keeps all entries when all paths exist", function()
+            local main, tmp = loadInTmpDir("cull-all-live")
+
+            local orig_getDataDir = DataStorage.getDataDir
+            DataStorage.getDataDir = function() return tmp end
+
+            -- Create real files
+            local file_a = tmp .. "/book-a.epub"
+            local file_b = tmp .. "/book-b.epub"
+            local f1 = io.open(file_a, "w"); f1:write("a"); f1:close()
+            local f2 = io.open(file_b, "w"); f2:write("b"); f2:close()
+
+            main:saveFulfillmentMapping("urn:uuid:a", file_a)
+            main:saveFulfillmentMapping("urn:uuid:b", file_b)
+
+            -- Both should still be there
+            assert.are.equal(file_a, main:lookupFulfillmentMapping("urn:uuid:a"))
+            assert.are.equal(file_b, main:lookupFulfillmentMapping("urn:uuid:b"))
+
+            DataStorage.getDataDir = orig_getDataDir
+            rmTmpDir(tmp)
+        end)
+
+        it("culls multiple stale entries in one save", function()
+            local main, tmp = loadInTmpDir("cull-multi")
+
+            local orig_getDataDir = DataStorage.getDataDir
+            DataStorage.getDataDir = function() return tmp end
+
+            local real_file = tmp .. "/real.epub"
+            local f = io.open(real_file, "w"); f:write("x"); f:close()
+
+            -- Seed two stale entries directly into the map
+            local map = main:getFulfillmentMap()
+            map:saveSetting("urn:uuid:stale1", "/nope/1.epub")
+            map:saveSetting("urn:uuid:stale2", "/nope/2.epub")
+            map:saveSetting("urn:uuid:live1", real_file)
+            map:flush()
+
+            -- Saving a new entry triggers culling of both stale entries
+            main:saveFulfillmentMapping("urn:uuid:new", real_file)
+
+            assert.is_nil(main:lookupFulfillmentMapping("urn:uuid:stale1"))
+            assert.is_nil(main:lookupFulfillmentMapping("urn:uuid:stale2"))
+            assert.are.equal(real_file, main:lookupFulfillmentMapping("urn:uuid:live1"))
+            assert.are.equal(real_file, main:lookupFulfillmentMapping("urn:uuid:new"))
+
+            DataStorage.getDataDir = orig_getDataDir
+            rmTmpDir(tmp)
+        end)
+
+        it("persists culled state to disk", function()
+            local main, tmp = loadInTmpDir("cull-persist")
+
+            local orig_getDataDir = DataStorage.getDataDir
+            DataStorage.getDataDir = function() return tmp end
+
+            local real_file = tmp .. "/real.epub"
+            local f = io.open(real_file, "w"); f:write("y"); f:close()
+
+            -- Seed stale entry directly
+            local map = main:getFulfillmentMap()
+            map:saveSetting("urn:uuid:gone", "/vanished.epub")
+            map:flush()
+
+            -- Trigger cull
+            main:saveFulfillmentMapping("urn:uuid:fresh", real_file)
+
+            -- Reload from disk with a fresh instance
+            local main2 = loadFresh()
+            main2.settings_file = tmp .. "/settings/acsm.lua"
+            assert.is_nil(main2:lookupFulfillmentMapping("urn:uuid:gone"))
+            assert.are.equal(real_file, main2:lookupFulfillmentMapping("urn:uuid:fresh"))
+
+            DataStorage.getDataDir = orig_getDataDir
+            rmTmpDir(tmp)
+        end)
+
+        it("skips non-string values when culling", function()
+            local main, tmp = loadInTmpDir("cull-nonstring")
+
+            local orig_getDataDir = DataStorage.getDataDir
+            DataStorage.getDataDir = function() return tmp end
+
+            local real_file = tmp .. "/real.epub"
+            local f = io.open(real_file, "w"); f:write("z"); f:close()
+
+            -- Seed a non-string value (shouldn't happen in practice,
+            -- but the cull loop should handle it gracefully)
+            local map = main:getFulfillmentMap()
+            map:saveSetting("urn:uuid:weird", 42)
+            map:flush()
+
+            -- Should not error
+            main:saveFulfillmentMapping("urn:uuid:ok", real_file)
+
+            -- Non-string entry should still be there (not culled)
+            assert.are.equal(42, main:lookupFulfillmentMapping("urn:uuid:weird"))
+
+            DataStorage.getDataDir = orig_getDataDir
+            rmTmpDir(tmp)
+        end)
+    end)
+
+    -- ================================================================
     -- fulfillLoan (stubbed network)
     -- ================================================================
     describe("fulfillLoan", function()

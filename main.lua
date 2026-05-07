@@ -310,6 +310,14 @@ end
 -- @string output_path where the EPUB was saved
 function ACSM:saveFulfillmentMapping(resource_id, output_path)
     local map = self:getFulfillmentMap()
+
+    -- Cull stale entries: paths that no longer exist on disk
+    for rid, path in pairs(map.data) do
+        if type(path) == "string" and not util.pathExists(path) then
+            map:delSetting(rid)
+        end
+    end
+
     map:saveSetting(resource_id, output_path)
     map:flush()
     logger.info("[ACSM] Saved fulfillment mapping:", resource_id, "→", output_path)
