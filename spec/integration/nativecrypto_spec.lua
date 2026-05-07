@@ -3,11 +3,80 @@
 -- for nativecrypto functions not covered by crypto_spec.lua.
 
 describe("nativecrypto edge cases", function()
-    local nc
+    local nc, ffi, libcrypto
 
     setup(function()
         nc = require("adobe.util.nativecrypto")
+        ffi = require("ffi")
+
+        -- Load libcrypto (same way nativecrypto does)
+        if ffi.loadlib then
+            libcrypto = ffi.loadlib("crypto", "57", "crypto")
+        else
+            libcrypto = ffi.load("crypto")
+        end
+
+        -- X509 creation helpers (for encrypt_with_cert tests)
+        pcall(ffi.cdef, [[
+            typedef struct X509_name_st X509_NAME;
+            X509 *X509_new(void);
+            int X509_set_version(void *x, long version);
+            int ASN1_INTEGER_set(void *a, long v);
+            void *X509_get0_serialNumber(void *x);
+            int X509_set_pubkey(void *x, void *pkey);
+            int X509_sign(void *x, void *pkey, const void *evp_md);
+            void *X509_get0_notBefore(void *x);
+            void *X509_get0_notAfter(void *x);
+            void *X509_time_adj(void *s, long offset_day, long *offset_sec);
+            const void *EVP_sha256(void);
+            X509_NAME *X509_NAME_new(void);
+            void X509_NAME_free(X509_NAME *a);
+            int X509_NAME_add_entry_by_NID(X509_NAME *name, int nid, int type,
+                const unsigned char *bytes, int len, int loc, int set);
+            int X509_set_subject_name(void *x, X509_NAME *name);
+            int X509_set_issuer_name(void *x, X509_NAME *name);
+        ]])
     end)
+
+    --- Helper: create a minimal self-signed X509 cert and export as DER.
+    -- Used to test encrypt_with_cert with real X509 certificates.
+    local function makeSelfSignedCert(pkey)
+        local cert = libcrypto.X509_new()
+        assert(cert ~= nil, "X509_new failed")
+        ffi.gc(cert, libcrypto.X509_free)
+
+        assert(libcrypto.X509_set_version(cert, 2) == 1, "set_version failed")
+        assert(libcrypto.ASN1_INTEGER_set(
+            libcrypto.X509_get0_serialNumber(cert), 1) == 1, "set_serial failed")
+
+        local name = libcrypto.X509_NAME_new()
+        assert(name ~= nil, "X509_NAME_new failed")
+        ffi.gc(name, libcrypto.X509_NAME_free)
+        -- NID_commonName = 13, MBSTRING_ASC = 0x1001
+        local cn = "test"
+        assert(libcrypto.X509_NAME_add_entry_by_NID(
+            name, 13, 0x1001, cn, #cn, -1, 0) == 1, "add_entry failed")
+        assert(libcrypto.X509_set_subject_name(cert, name) == 1, "set_subject failed")
+        assert(libcrypto.X509_set_issuer_name(cert, name) == 1, "set_issuer failed")
+
+        assert(libcrypto.X509_set_pubkey(cert, pkey.ctx) == 1, "set_pubkey failed")
+
+        libcrypto.X509_time_adj(libcrypto.X509_get0_notBefore(cert), 0, nil)
+        libcrypto.X509_time_adj(libcrypto.X509_get0_notAfter(cert), 365, nil)
+
+        local md = libcrypto.EVP_sha256()
+        assert(md ~= nil, "EVP_sha256 failed")
+        local sigLen = libcrypto.X509_sign(cert, pkey.ctx, md)
+        assert(sigLen > 0, "X509_sign failed")
+
+        -- Export DER via i2d_X509 (already declared in nativecrypto)
+        local out = ffi.new("unsigned char *[1]")
+        local len = libcrypto.i2d_X509(cert, out)
+        assert(len > 0, "i2d_X509 failed")
+        local der = ffi.string(out[0], len)
+        libcrypto.CRYPTO_free(out[0])
+        return der
+    end
 
     describe("rand_bytes", function()
         it("produces requested length", function()
@@ -60,6 +129,53 @@ describe("nativecrypto edge cases", function()
             local dec, err = k2:decrypt(enc, nc.RSA_PKCS1_PADDING)
             assert.is_nil(dec)
             assert.is.truthy(err)
+        end)
+    end)
+
+    describe("encrypt_with_cert", function()
+        it("round-trips: encrypt with X509 cert, decrypt with matching private key", function()
+            local key = assert(nc.generate_rsa_key(1025, 65537))
+            local certDer = makeSelfSignedCert(key)
+
+            local plaintext = "Hello, certificate encryption!"
+            local encrypted = assert(nc.encrypt_with_cert(certDer, plaintext))
+
+            local decrypted = assert(key:decrypt(encrypted, nc.RSA_PKCS1_PADDING))
+            assert.are.equal(plaintext, decrypted)
+        end)
+
+        it("produces different ciphertext for different certs", function()
+            local k1 = assert(nc.generate_rsa_key(1025, 65537))
+            local k2 = assert(nc.generate_rsa_key(1025, 65537))
+            local cert1 = makeSelfSignedCert(k1)
+            local cert2 = makeSelfSignedCert(k2)
+
+            local plaintext = "same data, different certs"
+            local enc1 = assert(nc.encrypt_with_cert(cert1, plaintext))
+            local enc2 = assert(nc.encrypt_with_cert(cert2, plaintext))
+
+            assert.are_not.equal(enc1, enc2)
+        end)
+
+        it("errors on invalid cert data", function()
+            local ok, err = nc.encrypt_with_cert("not-a-valid-cert", "test")
+            assert.is_nil(ok)
+            assert.is.truthy(err)
+        end)
+
+        it("errors on empty cert data", function()
+            local ok, err = nc.encrypt_with_cert("", "test")
+            assert.is_nil(ok)
+            assert.is.truthy(err)
+        end)
+
+        it("ciphertext size equals RSA key size", function()
+            local key = assert(nc.generate_rsa_key(1025, 65537))
+            local certDer = makeSelfSignedCert(key)
+
+            local encrypted = assert(nc.encrypt_with_cert(certDer, "short"))
+            -- RSA-1025 produces 129-byte ciphertext
+            assert.are.equal(129, #encrypted)
         end)
     end)
 

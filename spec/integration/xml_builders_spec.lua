@@ -6,6 +6,50 @@ local function plain(str, sub)
     return str:find(sub, 1, true)
 end
 
+describe("xml.deserialize edge cases", function()
+    local xml
+
+    setup(function()
+        xml = require("adobe.util.xml")
+    end)
+
+    it("returns a table for empty string", function()
+        local result = xml.deserialize("")
+        assert.is.truthy(type(result) == "table")
+    end)
+
+    it("errors on non-XML plain text", function()
+        local ok, err = pcall(xml.deserialize, "hello world this is not xml")
+        assert.is_false(ok)
+        assert.is.truthy(tostring(err):find("Error"))
+    end)
+
+    it("errors on truncated XML (unclosed tags)", function()
+        local ok, err = pcall(xml.deserialize, "<root><child>")
+        assert.is_false(ok)
+        assert.is.truthy(tostring(err):find("Incomplete"))
+    end)
+
+    it("errors on nil input", function()
+        local ok, err = pcall(xml.deserialize, nil)
+        assert.is_false(ok)
+    end)
+
+    it("parses well-formed XML into a table tree", function()
+        local result = xml.deserialize("<root><child>text</child></root>")
+        assert.is.truthy(type(result) == "table")
+        assert.is.truthy(result.root)
+        assert.are.equal("text", result.root.child)
+    end)
+
+    it("handles attributes correctly", function()
+        local result = xml.deserialize('<item attr="val">content</item>')
+        assert.is.truthy(result.item)
+        assert.are.equal("val", result.item._attr.attr)
+        assert.are.equal("content", result.item[1])
+    end)
+end)
+
 describe("XML builders", function()
     local xml, crypto, util
 

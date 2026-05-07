@@ -37,6 +37,38 @@ describe("zlib inflate", function()
         end
     end)
 
+    --- Helper: compress data with zlib-wrapped deflate (2-byte header + checksum)
+    local function zlibDeflate(data)
+        local stream = ffi.new("z_stream[1]")
+        local rc = libz.deflateInit2_(
+            stream, Z_DEFAULT_COMPRESSION, 8,  -- method = DEFLATED
+            15,                                 -- windowBits = 15 (zlib-wrapped)
+            8,                                  -- memLevel
+            0,                                  -- strategy = default
+            libz.zlibVersion(), ffi.sizeof(stream[0])
+        )
+        if rc ~= Z_OK then
+            return nil, "deflateInit2 failed: " .. rc
+        end
+
+        stream[0].next_in = ffi.cast("Bytef *", data)
+        stream[0].avail_in = #data
+
+        local outbuf = ffi.new("uint8_t[?]", #data + 256)
+        stream[0].next_out = outbuf
+        stream[0].avail_out = #data + 256
+
+        rc = libz.deflate(stream, Z_FINISH)
+        if rc ~= Z_STREAM_END then
+            libz.deflateEnd(stream)
+            return nil, "deflate failed: " .. rc
+        end
+
+        local produced = (#data + 256) - tonumber(stream[0].avail_out)
+        libz.deflateEnd(stream)
+        return ffi.string(outbuf, produced)
+    end
+
     --- Helper: compress data with raw deflate (no zlib header)
     local function rawDeflate(data)
         local stream = ffi.new("z_stream[1]")
@@ -184,6 +216,124 @@ describe("zlib inflate", function()
             -- The sink error should propagate
             assert.is_nil(ok)
             assert.are.equal("sink aborted", err)
+            inflater:finalize()
+        end)
+    end)
+
+    describe("inflater (zlib-wrapped, streaming)", function()
+        it("round-trips zlib-wrapped compressed data", function()
+            local data = "Hello, zlib-wrapped inflater!"
+            local compressed = assert(zlibDeflate(data))
+
+            local inflater = assert(zlib.inflater())
+            local chunks = {}
+            local sink = function(ptr, len)
+                chunks[#chunks + 1] = ffi.string(ptr, len)
+                return true
+            end
+
+            assert(inflater:update(compressed, #compressed, sink))
+            inflater:finalize()
+
+            assert.are.equal(data, table.concat(chunks))
+        end)
+
+        it("handles data larger than CHUNK_SIZE", function()
+            local data = string.rep("zlib-wrapped large data test. ", 2000)
+            assert.is.truthy(#data > CHUNK_SIZE)
+            local compressed = assert(zlibDeflate(data))
+
+            local inflater = assert(zlib.inflater())
+            local chunks = {}
+            local sink = function(ptr, len)
+                chunks[#chunks + 1] = ffi.string(ptr, len)
+                return true
+            end
+
+            assert(inflater:update(compressed, #compressed, sink))
+            inflater:finalize()
+
+            assert.are.equal(data, table.concat(chunks))
+        end)
+
+        it("round-trips binary data with null bytes", function()
+            local parts = {}
+            for i = 0, 255 do
+                parts[#parts + 1] = string.char(i)
+            end
+            local data = table.concat(parts)
+            local compressed = assert(zlibDeflate(data))
+
+            local inflater = assert(zlib.inflater())
+            local chunks = {}
+            local sink = function(ptr, len)
+                chunks[#chunks + 1] = ffi.string(ptr, len)
+                return true
+            end
+
+            assert(inflater:update(compressed, #compressed, sink))
+            inflater:finalize()
+
+            assert.are.equal(data, table.concat(chunks))
+        end)
+
+        it("feeds data in small chunks", function()
+            local data = "Streaming zlib-wrapped inflation with chunked input."
+            local compressed = assert(zlibDeflate(data))
+
+            local inflater = assert(zlib.inflater())
+            local chunks = {}
+            local sink = function(ptr, len)
+                chunks[#chunks + 1] = ffi.string(ptr, len)
+                return true
+            end
+
+            -- Feed compressed data in 4-byte chunks
+            local offset = 1
+            while offset <= #compressed do
+                local chunk = compressed:sub(offset, math.min(offset + 3, #compressed))
+                assert(inflater:update(chunk, #chunk, sink))
+                offset = offset + #chunk
+            end
+            inflater:finalize()
+
+            assert.are.equal(data, table.concat(chunks))
+        end)
+
+        it("errors on update after finalize", function()
+            local data = "test"
+            local compressed = assert(zlibDeflate(data))
+
+            local inflater = assert(zlib.inflater())
+            local sink = function() return true end
+            assert(inflater:update(compressed, #compressed, sink))
+            inflater:finalize()
+
+            local ok, err = inflater:update("more", 4, sink)
+            assert.is_nil(ok)
+            assert.is.truthy(err)
+        end)
+
+        it("cannot decompress raw-deflate data (missing zlib header)", function()
+            -- rawInflater uses windowBits=-15; inflater uses windowBits=15.
+            -- Raw-deflate data has no 2-byte zlib header, so the zlib inflater should fail.
+            local data = "raw deflate data"
+            local rawCompressed = assert(rawDeflate(data))
+
+            local inflater = assert(zlib.inflater())
+            local sink = function() return true end
+            local ok, err = inflater:update(rawCompressed, #rawCompressed, sink)
+            assert.is_nil(ok)
+            assert.is.truthy(err)
+            inflater:finalize()
+        end)
+
+        it("errors on invalid compressed data", function()
+            local inflater = assert(zlib.inflater())
+            local sink = function() return true end
+            local ok, err = inflater:update("not-valid-zlib-data", 19, sink)
+            assert.is_nil(ok)
+            assert.is.truthy(err)
             inflater:finalize()
         end)
     end)

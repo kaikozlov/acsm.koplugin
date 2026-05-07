@@ -180,6 +180,48 @@ describe("epub module", function()
     -- decryptAdeptEntryFile (streaming file-to-file)
     -- ---------------------------------------------------------------
     describe("_decryptAdeptEntryFile", function()
+        --- Helper: compress data with raw deflate (no zlib header)
+        local function rawDeflate(data)
+            local _ffi = require("ffi")
+            pcall(_ffi.cdef, [[
+                int deflateInit2_(z_stream *strm, int level, int method, int windowBits,
+                                  int memLevel, int strategy, const char *version, int stream_size);
+                int deflate(z_stream *strm, int flush);
+                int deflateEnd(z_stream *strm);
+            ]])
+            local libz
+            if _ffi.loadlib then
+                libz = _ffi.loadlib("z", "1")
+            else
+                libz = _ffi.load("z")
+            end
+
+            local stream = _ffi.new("z_stream[1]")
+            local rc = libz.deflateInit2_(stream, 6, 8, -15, 8, 0,
+                                           libz.zlibVersion(), _ffi.sizeof(stream[0]))
+            assert(rc == 0, "deflateInit2 failed: " .. tostring(rc))
+
+            stream[0].next_in = _ffi.cast("Bytef *", data)
+            stream[0].avail_in = #data
+
+            local CHUNK = 32768
+            local outbuf = _ffi.new("uint8_t[?]", CHUNK)
+            local chunks = {}
+
+            repeat
+                stream[0].next_out = outbuf
+                stream[0].avail_out = CHUNK
+                rc = libz.deflate(stream, 4) -- Z_FINISH
+                local produced = CHUNK - tonumber(stream[0].avail_out)
+                if produced > 0 then
+                    chunks[#chunks + 1] = _ffi.string(outbuf, produced)
+                end
+            until rc == 1 -- Z_STREAM_END
+
+            libz.deflateEnd(stream)
+            return table.concat(chunks)
+        end
+
         it("should decrypt a file in-place", function()
             local plaintext = "Streaming decryption test with enough data to be meaningful. "
             plaintext = string.rep(plaintext, 20) -- ~1.2KB
@@ -211,6 +253,100 @@ describe("epub module", function()
             f2:close()
 
             assert.are.equal(plaintext, result)
+        end)
+
+        it("should decrypt and decompress (noDecomp=false)", function()
+            local plaintext = "Decompression test: this text will be compressed then encrypted. "
+                .. string.rep("Padding data to ensure enough blocks. ", 20)
+
+            -- Compress with raw deflate (what Adobe ADEPT uses)
+            local deflated = rawDeflate(plaintext)
+
+            -- Build encrypted blob: 16-byte prefix + compressed data + PKCS7 padding
+            local prefix = string.rep("\0", 16)
+            local payload = prefix .. deflated
+            local padLen = 16 - (#payload % 16)
+            local padded = payload .. string.rep(string.char(padLen), padLen)
+
+            local key = string.rep("\6", 16)
+            local iv = string.rep("\0", 16)
+            local encrypted = assert(nativecrypto.aes_cbc_encrypt(key, iv, padded, true))
+
+            local testDir = TEST_DATA_DIR .. "/decrypt_decomp_test"
+            require("util").makePath(testDir)
+            local testFile = testDir .. "/test_entry.bin"
+            local f = assert(io.open(testFile, "wb"))
+            f:write(encrypted)
+            f:close()
+
+            -- Decrypt with decompression (noDecomp=false)
+            local ok, err = epub._decryptAdeptEntryFile(testFile, key, false)
+            assert.is.truthy(ok, err)
+
+            local f2 = assert(io.open(testFile, "rb"))
+            local result = f2:read("*a")
+            f2:close()
+
+            assert.are.equal(plaintext, result)
+        end)
+
+        it("should decrypt and decompress large data (noDecomp=false)", function()
+            -- Generate ~64KB plaintext (enough to exercise streaming inflate)
+            local plaintext = string.rep("Large decompression test data for streaming path. ", 1500)
+            assert.is.truthy(#plaintext > 65536)
+
+            local deflated = rawDeflate(plaintext)
+
+            local prefix = string.rep("\0", 16)
+            local payload = prefix .. deflated
+            local padLen = 16 - (#payload % 16)
+            local padded = payload .. string.rep(string.char(padLen), padLen)
+
+            local key = string.rep("\7", 16)
+            local iv = string.rep("\0", 16)
+            local encrypted = assert(nativecrypto.aes_cbc_encrypt(key, iv, padded, true))
+
+            local testDir = TEST_DATA_DIR .. "/decrypt_decomp_large"
+            require("util").makePath(testDir)
+            local testFile = testDir .. "/large_entry.bin"
+            local f = assert(io.open(testFile, "wb"))
+            f:write(encrypted)
+            f:close()
+
+            local ok, err = epub._decryptAdeptEntryFile(testFile, key, false)
+            assert.is.truthy(ok, err)
+
+            local f2 = assert(io.open(testFile, "rb"))
+            local result = f2:read("*a")
+            f2:close()
+
+            assert.are.equal(#plaintext, #result)
+            assert.are.equal(plaintext, result)
+        end)
+
+        it("errors on corrupt compressed data (noDecomp=false)", function()
+            -- Build a blob with garbage compressed data
+            local prefix = string.rep("\0", 16)
+            local garbage = "this is not valid deflate data!!"
+            local payload = prefix .. garbage
+            local padLen = 16 - (#payload % 16)
+            local padded = payload .. string.rep(string.char(padLen), padLen)
+
+            local key = string.rep("\8", 16)
+            local iv = string.rep("\0", 16)
+            local encrypted = assert(nativecrypto.aes_cbc_encrypt(key, iv, padded, true))
+
+            local testDir = TEST_DATA_DIR .. "/decrypt_corrupt_test"
+            require("util").makePath(testDir)
+            local testFile = testDir .. "/corrupt_entry.bin"
+            local f = assert(io.open(testFile, "wb"))
+            f:write(encrypted)
+            f:close()
+
+            -- Should error, not silently return garbage
+            local ok, err = epub._decryptAdeptEntryFile(testFile, key, false)
+            assert.is_nil(ok)
+            assert.is.truthy(err)
         end)
 
         it("should handle large files without excessive memory", function()
