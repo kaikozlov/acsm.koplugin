@@ -1,39 +1,75 @@
 local ffi = require("ffi")
 
-local isAndroid = pcall(require, "android")
+--- Resolve the system library directory for a given architecture.
+-- KOReader ships separate APKs for 32-bit (arm) and 64-bit (arm64). On a 64-bit
+-- device running the 32-bit APK, the process is 32-bit and /system/lib64/ contains
+-- the wrong architecture. Detect via jit.arch which system lib path to use.
+-- @param arch string jit.arch value (e.g. "arm64", "arm", "x64", "x86")
+-- @return string "/system/lib64" or "/system/lib"
+local function systemLibDir(arch)
+    if arch == "arm64" or arch == "x64" then
+        return "/system/lib64"
+    else
+        return "/system/lib"
+    end
+end
 
-pcall(require, "ffi/loadlib")
+--- Copy a system .so to the app's data dir and load it via FFI.
+-- Uses an arch-tagged cache filename (e.g. libcrypto.arm64.so) to prevent stale
+-- wrong-arch caches after switching between 32-bit and 64-bit APKs.
+-- Cleans up any legacy untagged cache (libcrypto.so) on sight.
+local function androidCopyLoad(lib_name, arch, data_dir)
+    local sys_dir = systemLibDir(arch)
+    local sys_path = sys_dir .. "/lib" .. lib_name .. ".so"
+    local tagged_name = "lib" .. lib_name .. "." .. arch .. ".so"
+    local local_path = data_dir .. "/" .. tagged_name
 
-local libcrypto
-if isAndroid then
-    -- On Android, KOReader's monolibtic only exports a tiny subset of crypto symbols.
-    -- Use the system BoringSSL instead, which has everything we need.
-    --
-    -- The app's linker namespace blocks dlopen of /system/lib64/libcrypto.so directly,
-    -- so we copy it to the app's data directory (which IS in the permitted namespace)
-    -- and load from there.
-    local android = require("android")
-    local sys_crypto = "/system/lib64/libcrypto.so"
-    local local_crypto = android.dir .. "/libcrypto.so"
+    -- Clean up legacy untagged cache (libcrypto.so)
+    local legacy = data_dir .. "/lib" .. lib_name .. ".so"
+    local f = io.open(legacy, "rb")
+    if f then
+        f:close()
+        os.remove(legacy)
+    end
 
-    -- Check if we already have a copy
-    local cached = io.open(local_crypto, "rb")
+    -- Check if we already have a cached copy for this arch
+    local cached = io.open(local_path, "rb")
     if cached then
         cached:close()
     else
-        -- Copy system BoringSSL to app data dir
-        local src = io.open(sys_crypto, "rb")
+        -- Copy system library to app data dir
+        local src = io.open(sys_path, "rb")
         if src then
             local data = src:read("*a")
             src:close()
-            local dst = io.open(local_crypto, "wb")
+            local dst = io.open(local_path, "wb")
             if dst then
                 dst:write(data)
                 dst:close()
             end
         end
     end
-    libcrypto = ffi.load(local_crypto)
+
+    return ffi.load(local_path)
+end
+
+-- Exposed for testing: arch-aware system lib directory resolver and copy-and-load.
+-- Must be global so they're accessible before the local nativecrypto table is created
+-- and so zlib.lua's test can reference them without cross-module require on Android.
+_nativecrypto_systemLibDir = systemLibDir
+_nativecrypto_androidCopyLoad = androidCopyLoad
+
+local isAndroid = pcall(require, "android")
+
+pcall(require, "ffi/loadlib")
+
+local libcrypto
+if isAndroid then
+    -- On Android, KOReader's monolbtic only exports a tiny subset of crypto symbols.
+    -- Use the system BoringSSL instead, which has everything we need.
+    -- androidCopyLoad handles arch detection, arch-tagged caching, and legacy cleanup.
+    local android = require("android")
+    libcrypto = androidCopyLoad("crypto", jit.arch, android.dir)
 elseif ffi.loadlib then
     -- On Kindle/etc, KOReader ships a standalone LibreSSL with full symbols.
     libcrypto = ffi.loadlib("crypto", "57", "crypto")

@@ -40,31 +40,63 @@ int inflate(z_stream *strm, int flush);
 int inflateEnd(z_stream *strm);
 ]]
 
-pcall(require, "ffi/loadlib")
+--- Resolve the system library directory for a given architecture.
+-- Duplicated from nativecrypto.lua — cannot require() a shared module on Android
+-- because KOReader's monolbtic resolver intercepts the require and fails.
+-- See nativecrypto.lua for rationale.
+local function systemLibDir(arch)
+    if arch == "arm64" or arch == "x64" then
+        return "/system/lib64"
+    else
+        return "/system/lib"
+    end
+end
 
-local libz
-if isAndroid then
-    -- Same as nativecrypto.lua: monolibtic doesn't export zlib symbols.
-    -- Copy system libz to app data dir and load from there.
-    local android = require("android")
-    local sys_libz = "/system/lib64/libz.so"
-    local local_libz = android.dir .. "/libz.so"
-    local cached = io.open(local_libz, "rb")
+--- Copy a system .so to the app's data dir and load it via FFI.
+-- Duplicated from nativecrypto.lua for the same reason.
+local function androidCopyLoad(lib_name, arch, data_dir)
+    local sys_dir = systemLibDir(arch)
+    local sys_path = sys_dir .. "/lib" .. lib_name .. ".so"
+    local tagged_name = "lib" .. lib_name .. "." .. arch .. ".so"
+    local local_path = data_dir .. "/" .. tagged_name
+
+    -- Clean up legacy untagged cache
+    local legacy = data_dir .. "/lib" .. lib_name .. ".so"
+    local f = io.open(legacy, "rb")
+    if f then
+        f:close()
+        os.remove(legacy)
+    end
+
+    local cached = io.open(local_path, "rb")
     if cached then
         cached:close()
     else
-        local src = io.open(sys_libz, "rb")
+        local src = io.open(sys_path, "rb")
         if src then
             local data = src:read("*a")
             src:close()
-            local dst = io.open(local_libz, "wb")
+            local dst = io.open(local_path, "wb")
             if dst then
                 dst:write(data)
                 dst:close()
             end
         end
     end
-    libz = ffi.load(local_libz)
+
+    return ffi.load(local_path)
+end
+
+-- Exposed for testing.
+_zlib_systemLibDir = systemLibDir
+
+pcall(require, "ffi/loadlib")
+
+local libz
+if isAndroid then
+    -- Same as nativecrypto.lua: monolbtic doesn't export zlib symbols.
+    local android = require("android")
+    libz = androidCopyLoad("z", jit.arch, android.dir)
 elseif ffi.loadlib then
     libz = ffi.loadlib("z", "1")
 else
