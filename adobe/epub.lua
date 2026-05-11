@@ -306,8 +306,10 @@ local function makeTempDir()
     if lfs.attributes(tmpDir, "mode") == "directory" then
         removeTree(tmpDir)
     end
-    local ok, err = koutil.makePath(tmpDir)
-    assert(ok, err)
+    local ok, err = lfs.mkdir(tmpDir)
+    if not ok and lfs.attributes(tmpDir, "mode") ~= "directory" then
+        return nil, "Failed to create temp dir: " .. tmpDir .. ": " .. err
+    end
     return tmpDir
 end
 
@@ -390,8 +392,8 @@ local function extractEpub(inputPath, workDir)
             local fullPath = workDir .. "/" .. entry.path
             local parent = fullPath:match("^(.*)/[^/]+$")
             if parent and parent ~= "" then
-                local ok, err = koutil.makePath(parent)
-                if not ok then
+                local ok, err = lfs.mkdir(parent)
+                if not ok and lfs.attributes(parent, "mode") ~= "directory" then
                     reader:close()
                     return nil, err
                 end
