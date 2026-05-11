@@ -300,7 +300,9 @@ end
 
 local function makeTempDir()
     local cacheDir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
-    koutil.makePath(cacheDir)
+    if lfs.attributes(cacheDir, "mode") ~= "directory" then
+        lfs.mkdir(cacheDir)
+    end
     local tmpDir = cacheDir .. "/epub_work"
     -- Clean up any previous run
     if lfs.attributes(tmpDir, "mode") == "directory" then

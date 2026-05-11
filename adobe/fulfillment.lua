@@ -22,8 +22,9 @@ local ADEPT = adobehash.ADEPT
 
 local function uniqueCachePath(prefix, suffix)
     local cacheDir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
-    logger.info("[ACSM] fulfillment.process: ensuring cache dir=", cacheDir)
-    koutil.makePath(cacheDir)
+    if lfs.attributes(cacheDir, "mode") ~= "directory" then
+        lfs.mkdir(cacheDir)
+    end
     for i = 1, 999 do
         local path = cacheDir .. "/" .. prefix .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999)) .. suffix
         local f = io.open(path, "wx")
