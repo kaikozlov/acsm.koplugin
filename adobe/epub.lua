@@ -315,6 +315,24 @@ local function makeTempDir()
     return tmpDir
 end
 
+local function ensureDir(path)
+    if not path or path == "" or lfs.attributes(path, "mode") == "directory" then
+        return true
+    end
+
+    local parent = path:match("^(.*)/[^/]+$")
+    if parent and parent ~= "" and lfs.attributes(parent, "mode") ~= "directory" then
+        local ok, err = ensureDir(parent)
+        if not ok then return nil, err end
+    end
+
+    local ok, err = lfs.mkdir(path)
+    if not ok and lfs.attributes(path, "mode") ~= "directory" then
+        return nil, err
+    end
+    return true
+end
+
 local function listFiles(workDir)
     local files = {}
     local function walk(dir, relBase)
@@ -394,8 +412,8 @@ local function extractEpub(inputPath, workDir)
             local fullPath = workDir .. "/" .. entry.path
             local parent = fullPath:match("^(.*)/[^/]+$")
             if parent and parent ~= "" then
-                local ok, err = lfs.mkdir(parent)
-                if not ok and lfs.attributes(parent, "mode") ~= "directory" then
+                local ok, err = ensureDir(parent)
+                if not ok then
                     reader:close()
                     return nil, err
                 end

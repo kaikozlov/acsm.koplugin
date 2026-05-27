@@ -308,6 +308,76 @@ have enough data to work with across multiple AES blocks.</p>
         os.execute("rm -rf " .. tmpDir)
     end)
 
+    it("extracts EPUBs whose first content entry needs nested directories", function()
+        local DataStorage = require("datastorage")
+        local Archiver = require("ffi/archiver")
+        local tmpDir = DataStorage:getDataDir() .. "/test-epub-nested-" .. tostring(os.time())
+        koutil.makePath(tmpDir)
+
+        local workDir = tmpDir .. "/build"
+        koutil.makePath(workDir .. "/META-INF")
+        koutil.makePath(workDir .. "/OPS/Text")
+
+        koutil.writeToFile("application/epub+zip", workDir .. "/mimetype")
+        koutil.writeToFile([[<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>]], workDir .. "/META-INF/container.xml")
+        koutil.writeToFile([[<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Nested Book</dc:title></metadata>
+  <manifest><item id="ch1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="ch1"/></spine>
+</package>]], workDir .. "/OPS/content.opf")
+
+        local deflated = rawDeflate(CHAPTER_TEXT)
+        local payload = string.rep("\0", 16) .. deflated
+        local padLen = 16 - (#payload % 16)
+        local padded = payload .. string.rep(string.char(padLen), padLen)
+        local encrypted = assert(nc.aes_cbc_encrypt(TEST_KEY, string.rep("\0", 16), padded, true))
+        koutil.writeToFile(encrypted, workDir .. "/OPS/Text/chapter1.xhtml")
+
+        koutil.writeToFile([[<?xml version="1.0" encoding="UTF-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
+            xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/>
+    <enc:CipherData><enc:CipherReference URI="OPS/Text/chapter1.xhtml"/></enc:CipherData>
+  </enc:EncryptedData>
+</encryption>]], workDir .. "/META-INF/encryption.xml")
+
+        local inputPath = tmpDir .. "/test_nested.epub"
+        local writer = Archiver.Writer:new{}
+        assert(writer:open(inputPath, "epub"))
+        local mtime = os.time()
+        writer:setZipCompression("store")
+        assert(writer:addFileFromMemory("mimetype", "application/epub+zip", mtime))
+        writer:setZipCompression("deflate")
+        writer:addPath("META-INF/container.xml", workDir .. "/META-INF/container.xml", false, mtime)
+        assert(not writer.err, "Failed to add container.xml: " .. tostring(writer.err))
+        writer:addPath("META-INF/encryption.xml", workDir .. "/META-INF/encryption.xml", false, mtime)
+        assert(not writer.err, "Failed to add encryption.xml: " .. tostring(writer.err))
+        writer:setZipCompression("store")
+        writer:addPath("OPS/Text/chapter1.xhtml", workDir .. "/OPS/Text/chapter1.xhtml", false, mtime)
+        assert(not writer.err, "Failed to add chapter1.xhtml: " .. tostring(writer.err))
+        writer:setZipCompression("deflate")
+        writer:addPath("OPS/content.opf", workDir .. "/OPS/content.opf", false, mtime)
+        assert(not writer.err, "Failed to add content.opf: " .. tostring(writer.err))
+        writer:close()
+
+        local outputPath = tmpDir .. "/decrypted.epub"
+        local result, err = epub.decryptAdobeEpub(inputPath, outputPath, TEST_KEY)
+        assert.is.truthy(result, "decryptAdobeEpub failed: " .. tostring(err))
+
+        local verifyDir = extractEpub(outputPath, tmpDir .. "/verify")
+        local content = koutil.readFromFile(verifyDir .. "/OPS/Text/chapter1.xhtml", "rb")
+        assert.are.equal(CHAPTER_TEXT, content)
+
+        os.execute("rm -rf " .. tmpDir)
+    end)
+
     it("preserves non-encrypted entries unchanged", function()
         local DataStorage = require("datastorage")
         local tmpDir = DataStorage:getDataDir() .. "/test-epub-preserve-" .. tostring(os.time())
