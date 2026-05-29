@@ -88,6 +88,10 @@ typedef struct evp_cipher_ctx_st EVP_CIPHER_CTX;
 typedef struct evp_cipher_st EVP_CIPHER;
 typedef struct pkcs8_priv_key_info_st PKCS8_PRIV_KEY_INFO;
 
+void OPENSSL_add_all_algorithms_noconf(void);
+void OpenSSL_add_all_ciphers(void);
+void OpenSSL_add_all_digests(void);
+
 int RAND_bytes(unsigned char *buf, int num);
 unsigned char *SHA1(const unsigned char *d, size_t n, unsigned char *md);
 
@@ -139,6 +143,20 @@ void PKCS12_free(PKCS12 *a);
 
 void CRYPTO_free(void *ptr);
 ]]
+
+-- Old Android OpenSSL 1.0.x builds need their global cipher/digest lookup
+-- tables populated before APIs like PKCS12_parse can resolve PBES2 algorithms
+-- by OID. Newer Android crypto stacks may not expose these symbols, so this is
+-- intentionally best-effort.
+if isAndroid then
+    local ok = pcall(function()
+        libcrypto.OPENSSL_add_all_algorithms_noconf()
+    end)
+    if not ok then
+        pcall(function() libcrypto.OpenSSL_add_all_ciphers() end)
+        pcall(function() libcrypto.OpenSSL_add_all_digests() end)
+    end
+end
 
 local nativecrypto = {
     RSA_PKCS1_PADDING = 1,
