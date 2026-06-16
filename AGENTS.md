@@ -33,13 +33,14 @@ KOReader Linux release with all native FFI libraries (`libcrypto.so.57`,
 code paths as the plugin on a real device.
 
 ```bash
-make setup                 # pull the koplugin-dev image (one-time)
-make test                  # run all tests (excludes e2e network tests)
-make test-e2e              # run e2e tests (hits real Adobe servers)
-make test-all              # run everything including e2e
-make test-filter FILTER="Crypto"  # run a subset by pattern
-make shell                 # drop into bash inside the container
-make lint                  # run luacheck inside the container
+just setup                 # pull the koplugin-dev image (one-time)
+just test                  # run all tests (excludes e2e network tests)
+just test-e2e              # run e2e tests (hits real Adobe servers)
+just test-all              # run everything including e2e
+just test-filter Crypto    # run a subset by pattern
+just build                 # build a release zip (versioned from _meta.lua)
+just shell                 # drop into bash inside the container
+just lint                  # run luacheck inside the container
 ```
 
 ### Spec layout
@@ -72,7 +73,7 @@ The test uses Adobe's smallest free sample ("God Is A Salesman" chapter 1,
 (PK zip header) and that decryption produced >0 entries.
 
 ```bash
-make test-e2e   # must have network; uses --network=host
+just test-e2e   # must have network; uses --network=host
 ```
 
 No credentials or configuration are needed — anonymous sign-in works for
@@ -95,7 +96,7 @@ fail with a network or HTTP error.
 
 ### Key files
 
-- `Makefile` — `test`, `test-e2e`, `test-all`, `test-filter`, `lint`, `shell`
+- `justfile` — `test`, `test-e2e`, `test-all`, `test-filter`, `lint`, `build`, `shell`
 - `spec/integration/fixtures/` — test fixtures (sample ACSM, etc.)
 - `adobe/util/adobehash.lua` — extracted hash buffer construction (testable separately from fulfillment)
 

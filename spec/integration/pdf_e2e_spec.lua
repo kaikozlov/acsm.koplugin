@@ -3,8 +3,8 @@
 -- the full activation → fulfillment → download → decrypt pipeline.
 --
 -- Tagged #e2e — requires network access. Run selectively:
---   make test-e2e
---   make test-filter FILTER="PDF e2e"
+--   just test-e2e
+--   just test-filter "PDF e2e"
 --
 -- Uses "Daisy Miller" by Henry James (Public Domain, 802 KB PDF):
 -- https://contentserver.adobe.com/fulfillment/URLLink.acsm?action=free&ordersource=operator&resid=urn%3Auuid%3A91797970-de30-4775-a139-7eb160a6688b

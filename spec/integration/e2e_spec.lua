@@ -3,7 +3,7 @@
 -- the full activation → fulfillment → download → decrypt pipeline.
 --
 -- Tagged #e2e — requires network access. Run selectively:
---   make docker-busted ARGS="--filter=e2e ..."
+--   just test-e2e
 --
 -- Uses Adobe's smallest free EPUB sample: "God Is A Salesman" (100 Kb)
 -- to minimize download time in CI.

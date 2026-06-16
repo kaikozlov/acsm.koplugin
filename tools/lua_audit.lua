@@ -2,7 +2,7 @@
 --- Compares against tools/deep_audit.py output.
 ---
 --- Usage inside Docker:
----   make docker-shell
+---   just shell
 ---   cd /opt/lib/koreader
 ---   luajit /opt/acsm.koplugin/tools/lua_audit.lua <encrypted.pdf> <book_key_hex> <V>
 

@@ -68,7 +68,7 @@ def main():
     if not os.path.exists(MANIFEST_PATH):
         print(f"ERROR: Manifest not found at {MANIFEST_PATH}")
         print("Run batch_cross_validate.lua inside Docker first:")
-        print("  make docker-shell")
+        print("  just shell")
         print("  cd /opt/lib/koreader")
         print("  luajit /opt/acsm.koplugin/tools/batch_cross_validate.lua")
         sys.exit(1)

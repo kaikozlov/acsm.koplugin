@@ -5,7 +5,7 @@
 --- Fresh ACSMs per run → no expiration issues.
 ---
 --- Run inside Docker:
----   make docker-shell
+---   just shell
 ---   cd /opt/lib/koreader
 ---   luajit /opt/acsm.koplugin/tools/batch_cross_validate.lua
 
