@@ -3,7 +3,6 @@
 local rc4 = require("adobe.pdf.rc4")
 
 describe("RC4 cipher", function()
-
     it("should handle empty input", function()
         local state = rc4.init("Key")
         local result = rc4.crypt(state, "")
@@ -24,7 +23,7 @@ describe("RC4 cipher", function()
         local plaintext = "Hello, World! This is a test of RC4."
         local enc_state = rc4.init(key)
         local encrypted = rc4.crypt(enc_state, plaintext)
-        assert.not_equals(plaintext, encrypted)  -- should be different
+        assert.not_equals(plaintext, encrypted) -- should be different
 
         local dec_state = rc4.init(key)
         local decrypted = rc4.crypt(dec_state, encrypted)
@@ -78,5 +77,4 @@ describe("RC4 cipher", function()
 
         assert.equals(full, streamed)
     end)
-
 end)

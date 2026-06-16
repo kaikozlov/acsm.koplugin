@@ -86,13 +86,13 @@ describe("DOM round-trip", function()
         local doc = dom.parse(xmlStr)
         local ns_map = dom.nsMapFor(doc)
 
-        local target, targetNsMap = dom.findDescendant(doc, ns_map, "target", "http://ns.adobe.com/adept")
+        local target = dom.findDescendant(doc, ns_map, "target", "http://ns.adobe.com/adept")
         assert.is.truthy(target)
         assert.are.equal("found-it", dom.textOf(target))
     end)
 
     it("serializeNode handles self-closing elements", function()
-        local xmlStr = '<root><empty/></root>'
+        local xmlStr = "<root><empty/></root>"
         local doc = dom.parse(xmlStr)
         local root = dom.firstElementChild(doc)
         local serialized = dom.serializeNode(root)
@@ -102,7 +102,7 @@ describe("DOM round-trip", function()
     end)
 
     it("serializeNode handles mixed text and element children", function()
-        local xmlStr = '<root>before<child>inner</child>after</root>'
+        local xmlStr = "<root>before<child>inner</child>after</root>"
         local doc = dom.parse(xmlStr)
         local root = dom.firstElementChild(doc)
         local serialized = dom.serializeNode(root)

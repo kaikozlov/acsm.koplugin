@@ -165,41 +165,25 @@ describe("Cross-validation against Python reference", function()
     describe("removeHardening", function()
         it("roundtrip with keyType=10", function()
             local v = vectors["removeHardening_roundtrip"]
-            local result = pdfcrypt.removeHardening(
-                v.hardenedData, v.keyType,
-                v.resourceUUID, v.deviceUUID, v.fulfillmentUUID,
-                nativecrypto.aes_cbc_decrypt
-            )
+            local result = pdfcrypt.removeHardening(v.hardenedData, v.keyType, v.resourceUUID, v.deviceUUID, v.fulfillmentUUID, nativecrypto.aes_cbc_decrypt)
             assert.are.equal(v.expected, result)
         end)
 
         it("keyType=3", function()
             local v = vectors["removeHardening_keytype_3"]
-            local result = pdfcrypt.removeHardening(
-                v.hardenedData, v.keyType,
-                v.resourceUUID, v.deviceUUID, v.fulfillmentUUID,
-                nativecrypto.aes_cbc_decrypt
-            )
+            local result = pdfcrypt.removeHardening(v.hardenedData, v.keyType, v.resourceUUID, v.deviceUUID, v.fulfillmentUUID, nativecrypto.aes_cbc_decrypt)
             assert.are.equal(v.expected, result)
         end)
 
         it("different resource UUID", function()
             local v = vectors["removeHardening_diff_resource"]
-            local result = pdfcrypt.removeHardening(
-                v.hardenedData, v.keyType,
-                v.resourceUUID, v.deviceUUID, v.fulfillmentUUID,
-                nativecrypto.aes_cbc_decrypt
-            )
+            local result = pdfcrypt.removeHardening(v.hardenedData, v.keyType, v.resourceUUID, v.deviceUUID, v.fulfillmentUUID, nativecrypto.aes_cbc_decrypt)
             assert.are.equal(v.expected, result)
         end)
 
         it("rem=0 edge case", function()
             local v = vectors["removeHardening_rem_zero"]
-            local result = pdfcrypt.removeHardening(
-                v.hardenedData, v.keyType,
-                v.resourceUUID, v.deviceUUID, v.fulfillmentUUID,
-                nativecrypto.aes_cbc_decrypt
-            )
+            local result = pdfcrypt.removeHardening(v.hardenedData, v.keyType, v.resourceUUID, v.deviceUUID, v.fulfillmentUUID, nativecrypto.aes_cbc_decrypt)
             assert.are.equal(v.expected, result)
         end)
     end)

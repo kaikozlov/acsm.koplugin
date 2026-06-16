@@ -6,7 +6,7 @@ describe("Crypto round-trips (real OpenSSL)", function()
     it("AES-128-CBC encrypt/decrypt round-trip", function()
         local nc = require("adobe.util.nativecrypto")
         local key = string.rep("\1", 16)
-        local iv  = string.rep("\0", 16)
+        local iv = string.rep("\0", 16)
         local plaintext = "Hello KOReader!"
 
         local encrypted = assert(nc.aes_cbc_encrypt(key, iv, plaintext, false))
@@ -16,10 +16,10 @@ describe("Crypto round-trips (real OpenSSL)", function()
 
     it("AES streaming decrypt matches one-shot", function()
         local ffi = require("ffi")
-        local nc  = require("adobe.util.nativecrypto")
+        local nc = require("adobe.util.nativecrypto")
         local data = string.rep("Streaming test data. ", 100)
-        local key  = string.rep("\2", 16)
-        local iv   = string.rep("\0", 16)
+        local key = string.rep("\2", 16)
+        local iv = string.rep("\0", 16)
 
         local pad = 16 - (#data % 16)
         local padded = data .. string.rep(string.char(pad), pad)
@@ -180,8 +180,7 @@ end)
 
 describe("crypto.encryptLogin(username, password, deviceKey, authCert)", function()
     -- Self-signed X.509 cert (1024-bit RSA) for testing RSA encryption
-    local testCert =
-        "MIIB+jCCAWOgAwIBAgIUJRe4soWVrZWEbjEhDD7+2XPx0QgwDQYJKoZIhvcNAQEL"
+    local testCert = "MIIB+jCCAWOgAwIBAgIUJRe4soWVrZWEbjEhDD7+2XPx0QgwDQYJKoZIhvcNAQEL"
         .. "BQAwDzENMAsGA1UEAwwEdGVzdDAeFw0yNjA1MDcwMDEyMDZaFw0yNzA1MDcwMDEy"
         .. "MDZaMA8xDTALBgNVBAMMBHRlc3QwgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGB"
         .. "AONF2jZjHnDTFSTYbEkuUvIFfKeGjHEV5GcE3ys67nid26Hm1JkF3tbaNtFgrimq"
@@ -239,8 +238,7 @@ end)
 describe("crypto.decodepkcs12(pk, deviceKey)", function()
     -- PKCS#12 blob created with password = base64(16 zero bytes) = "AAAAAAAAAAAAAAAAAAAAAA=="
     -- Contains a 1024-bit RSA key + self-signed cert
-    local pkcs12_b64 =
-        "MIIGpwIBAzCCBlUGCSqGSIb3DQEHAaCCBkYEggZCMIIGPjCCAvoGCSqGSIb3DQEH"
+    local pkcs12_b64 = "MIIGpwIBAzCCBlUGCSqGSIb3DQEHAaCCBkYEggZCMIIGPjCCAvoGCSqGSIb3DQEH"
         .. "BqCCAuswggLnAgEAMIIC4AYJKoZIhvcNAQcBMF8GCSqGSIb3DQEFDTBSMDEGCSqG"
         .. "SIb3DQEFDDAkBBD2QrcpnDLGado6wxRZTRBJAgIIADAMBggqhkiG9w0CCQUAMB0G"
         .. "CWCGSAFlAwQBKgQQpQP0/25IWnXTMUTPVR4HPICCAnAhkiorBZui0UHnb1NWTnJ0"

@@ -33,7 +33,7 @@ KOReader Linux release with all native FFI libraries (`libcrypto.so.57`,
 code paths as the plugin on a real device.
 
 ```bash
-just setup                 # pull the koplugin-dev image (one-time)
+just setup                 # install git hooks and pull the koplugin-dev image (one-time)
 just test                  # run all tests (excludes e2e network tests)
 just test-e2e              # run e2e tests (hits real Adobe servers)
 just test-all              # run everything including e2e
@@ -41,6 +41,8 @@ just test-filter Crypto    # run a subset by pattern
 just build                 # build a release zip (versioned from _meta.lua)
 just shell                 # drop into bash inside the container
 just lint                  # run luacheck inside the container
+just fmt-check             # check Lua formatting with stylua
+just fmt                   # format Lua code with stylua
 ```
 
 ### Spec layout
@@ -96,7 +98,7 @@ fail with a network or HTTP error.
 
 ### Key files
 
-- `justfile` — `test`, `test-e2e`, `test-all`, `test-filter`, `lint`, `build`, `shell`
+- `justfile` — `setup`, `install-hooks`, `test`, `test-e2e`, `test-all`, `test-filter`, `lint`, `fmt-check`, `fmt`, `build`, `shell`
 - `spec/integration/fixtures/` — test fixtures (sample ACSM, etc.)
 - `adobe/util/adobehash.lua` — extracted hash buffer construction (testable separately from fulfillment)
 

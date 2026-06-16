@@ -106,11 +106,7 @@ function dom.firstElementChild(node)
 end
 
 function dom.xmlEscape(s)
-    return (tostring(s)
-        :gsub("&", "&amp;")
-        :gsub("<", "&lt;")
-        :gsub(">", "&gt;")
-        :gsub('"', "&quot;"))
+    return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
 end
 
 function dom.serializeNode(node)
@@ -118,7 +114,9 @@ function dom.serializeNode(node)
     for attr_key, attr_value in pairs(node._attr or {}) do
         attrs[#attrs + 1] = { attr_key, attr_value }
     end
-    table.sort(attrs, function(a, b) return a[1] < b[1] end)
+    table.sort(attrs, function(a, b)
+        return a[1] < b[1]
+    end)
 
     local parts = { "<" .. node._name }
     for _, attr in ipairs(attrs) do

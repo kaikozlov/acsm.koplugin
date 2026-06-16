@@ -39,9 +39,9 @@ describe("PDF decryption helpers", function()
             local rights = {
                 outer = {
                     inner = {
-                        device = "urn:uuid:nested-device"
-                    }
-                }
+                        device = "urn:uuid:nested-device",
+                    },
+                },
             }
             assert.are.equal("urn:uuid:nested-device", pdf._findRightsText(rights, "device"))
         end)
@@ -64,8 +64,8 @@ describe("PDF decryption helpers", function()
         it("extracts from table with text child", function()
             local rights = {
                 licenseToken = {
-                    encryptedKey = { "dGVzdC1rZXk=", keyType = "2" }
-                }
+                    encryptedKey = { "dGVzdC1rZXk=", keyType = "2" },
+                },
             }
             local encKey, keyType = pdf._extractEncryptedKey(rights)
             assert.are.equal("dGVzdC1rZXk=", encKey)
@@ -74,11 +74,11 @@ describe("PDF decryption helpers", function()
 
         it("extracts from bare string value", function()
             local rights = {
-                encryptedKey = "dGVzdC1rZXk="
+                encryptedKey = "dGVzdC1rZXk=",
             }
             local encKey, keyType = pdf._extractEncryptedKey(rights)
             assert.are.equal("dGVzdC1rZXk=", encKey)
-            assert.are.equal("0", keyType)  -- default keyType
+            assert.are.equal("0", keyType) -- default keyType
         end)
 
         it("returns nil when no encryptedKey present", function()
@@ -90,7 +90,7 @@ describe("PDF decryption helpers", function()
         it("extracts from namespaced key", function()
             local nsKey = "{http://ns.adobe.com/adept}encryptedKey"
             local rights = {
-                [nsKey] = { "c2VjcmV0", keyType = "5" }
+                [nsKey] = { "c2VjcmV0", keyType = "5" },
             }
             local encKey, keyType = pdf._extractEncryptedKey(rights)
             assert.are.equal("c2VjcmV0", encKey)
@@ -107,12 +107,15 @@ describe("PDF decryption helpers", function()
         --- Raw deflate using zlib FFI (matching epub_spec approach).
         local function rawDeflate(data)
             ffi = ffi or require("ffi")
-            pcall(ffi.cdef, [[
+            pcall(
+                ffi.cdef,
+                [[
                 int deflateInit2_(z_stream *strm, int level, int method, int windowBits,
                                   int memLevel, int strategy, const char *version, int stream_size);
                 int deflate(z_stream *strm, int flush);
                 int deflateEnd(z_stream *strm);
-            ]])
+            ]]
+            )
             local libz
             if ffi.loadlib then
                 libz = ffi.loadlib("z", "1")
@@ -120,8 +123,7 @@ describe("PDF decryption helpers", function()
                 libz = ffi.load("z")
             end
             local stream = ffi.new("z_stream[1]")
-            local rc = libz.deflateInit2_(stream, 6, 8, -15, 8, 0,
-                                           libz.zlibVersion(), ffi.sizeof(stream[0]))
+            local rc = libz.deflateInit2_(stream, 6, 8, -15, 8, 0, libz.zlibVersion(), ffi.sizeof(stream[0]))
             assert(rc == 0, "deflateInit2 failed: " .. tostring(rc))
             stream[0].next_in = ffi.cast("Bytef *", data)
             stream[0].avail_in = #data
@@ -157,7 +159,11 @@ describe("PDF decryption helpers", function()
 </rights>]]
 
             local license = makeAdeptLicense(rightsXml)
-            local mockDoc = { _loadRawObject = function() return nil end }
+            local mockDoc = {
+                _loadRawObject = function()
+                    return nil
+                end,
+            }
             local encParam = { ADEPT_LICENSE = license }
             local rights, err = pdf._extractRights(mockDoc, encParam)
             assert.is.truthy(rights, "extractRights failed: " .. tostring(err))
@@ -166,14 +172,22 @@ describe("PDF decryption helpers", function()
         it("extracts from lowercase adept_license key", function()
             local rightsXml = [[<?xml version="1.0"?><rights><key>val</key></rights>]]
             local license = makeAdeptLicense(rightsXml)
-            local mockDoc = { _loadRawObject = function() return nil end }
+            local mockDoc = {
+                _loadRawObject = function()
+                    return nil
+                end,
+            }
             local encParam = { adept_license = license }
             local rights, err = pdf._extractRights(mockDoc, encParam)
             assert.is.truthy(rights, "extractRights failed: " .. tostring(err))
         end)
 
         it("returns error for missing ADEPT_LICENSE", function()
-            local mockDoc = { _loadRawObject = function() return nil end }
+            local mockDoc = {
+                _loadRawObject = function()
+                    return nil
+                end,
+            }
             local encParam = { Filter = "EBX_HANDLER", V = 4 }
             local rights, err = pdf._extractRights(mockDoc, encParam)
             assert.is_nil(rights)
@@ -184,7 +198,11 @@ describe("PDF decryption helpers", function()
         it("handles stream object encParam (rawdata is ADEPT_LICENSE)", function()
             local rightsXml = [[<?xml version="1.0"?><rights><data>ok</data></rights>]]
             local license = makeAdeptLicense(rightsXml)
-            local mockDoc = { _loadRawObject = function() return nil end }
+            local mockDoc = {
+                _loadRawObject = function()
+                    return nil
+                end,
+            }
             -- Stream object: has dic and rawdata, no direct ADEPT_LICENSE key
             local encParam = {
                 dic = { Filter = "EBX_HANDLER" },
@@ -288,7 +306,7 @@ describe("PDF decryption helpers", function()
 
             -- Create two ciphertexts with different per-object keys
             local iv = string.rep(string.char(0), 16)
-            local plain = "test data here!!"  -- 16 bytes
+            local plain = "test data here!!" -- 16 bytes
             local padded = plain .. string.rep(string.char(16), 16)
 
             local key1 = pdfcrypt.genkey_v2(bookKey, 1, 0)

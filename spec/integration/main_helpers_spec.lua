@@ -4,7 +4,7 @@
 -- Temp directories are used for settings/cache isolation.
 
 describe("main.lua helpers & orchestration", function()
-    local koutil, DataStorage, ffiUtil, LuaSettings, lfs
+    local koutil, DataStorage, ffiUtil, LuaSettings
     local plugin_path
 
     setup(function()
@@ -12,7 +12,6 @@ describe("main.lua helpers & orchestration", function()
         DataStorage = require("datastorage")
         ffiUtil = require("ffi/util")
         LuaSettings = require("luasettings")
-        lfs = require("libs/libkoreader-lfs")
         plugin_path = os.getenv("PLUGIN_PATH") or "/opt/plugin"
     end)
 
@@ -25,11 +24,8 @@ describe("main.lua helpers & orchestration", function()
     --- Create an isolated temp dir with settings/ and cache/ subdirs.
     -- Returns the tmp dir path.
     local function makeTmpDir(tag)
-        local base = _G.TEST_DATA_DIR
-            or os.getenv("TEST_DATA_DIR")
-            or "/tmp/koreader-test-data"
-        local tmp = base .. "/acsm-main-test-" .. tag .. "-"
-            .. tostring(os.time()) .. "-" .. math.random(100000, 999999)
+        local base = _G.TEST_DATA_DIR or os.getenv("TEST_DATA_DIR") or "/tmp/koreader-test-data"
+        local tmp = base .. "/acsm-main-test-" .. tag .. "-" .. tostring(os.time()) .. "-" .. math.random(100000, 999999)
         koutil.makePath(tmp .. "/settings")
         koutil.makePath(tmp .. "/cache/acsm.koplugin")
         return tmp
@@ -58,18 +54,15 @@ describe("main.lua helpers & orchestration", function()
         end)
 
         it("matches E_ADEPT_USER_AUTH", function()
-            assert.is.truthy(ACSM._isActivationError(
-                "E_ADEPT_USER_AUTH something went wrong"))
+            assert.is.truthy(ACSM._isActivationError("E_ADEPT_USER_AUTH something went wrong"))
         end)
 
         it("matches E_ADEPT_DISTRIBUTOR_AUTH", function()
-            assert.is.truthy(ACSM._isActivationError(
-                "E_ADEPT_DISTRIBUTOR_AUTH expired token"))
+            assert.is.truthy(ACSM._isActivationError("E_ADEPT_DISTRIBUTOR_AUTH expired token"))
         end)
 
         it("matches generic E_ADEPT error", function()
-            assert.is.truthy(ACSM._isActivationError(
-                "E_ADEPT unknown device"))
+            assert.is.truthy(ACSM._isActivationError("E_ADEPT unknown device"))
         end)
 
         it("returns falsy for non-activation error strings", function()
@@ -98,18 +91,15 @@ describe("main.lua helpers & orchestration", function()
         end)
 
         it("strips leading 'module: ' prefix", function()
-            assert.are.equal("something failed",
-                ACSM._trimError("adobe.lua: something failed"))
+            assert.are.equal("something failed", ACSM._trimError("adobe.lua: something failed"))
         end)
 
         it("strips only the first prefix", function()
-            assert.are.equal("foo: bar",
-                ACSM._trimError("module: foo: bar"))
+            assert.are.equal("foo: bar", ACSM._trimError("module: foo: bar"))
         end)
 
         it("returns unchanged string when no prefix", function()
-            assert.are.equal("plain error",
-                ACSM._trimError("plain error"))
+            assert.are.equal("plain error", ACSM._trimError("plain error"))
         end)
 
         it("converts nil to string 'nil'", function()
@@ -198,7 +188,7 @@ describe("main.lua helpers & orchestration", function()
                 licenseCert = "dummy-cert",
                 user = "urn:uuid:test-user",
                 username = "testuser",
-                pkcs12 = authKey:topkcs8(),  -- not valid pkcs12 but structurally present
+                pkcs12 = authKey:topkcs8(), -- not valid pkcs12 but structurally present
                 deviceUUID = "urn:uuid:test-device",
                 fingerprint = "test-fp",
                 authCert = "dummy-auth-cert",
@@ -221,7 +211,7 @@ describe("main.lua helpers & orchestration", function()
         it("returns nil for incomplete serialized data", function()
             local main, tmp = loadInTmpDir("restore-incomplete")
             main:loadSettings()
-            main.activation_blob = { deviceKey = "only-key" }  -- missing fields
+            main.activation_blob = { deviceKey = "only-key" } -- missing fields
             main:saveSettings()
 
             local result, err = main:restoreActivation()
@@ -234,10 +224,10 @@ describe("main.lua helpers & orchestration", function()
         it("clears activation when restore fails with corrupt data", function()
             local main, tmp = loadInTmpDir("restore-corrupt")
             main:loadSettings()
-            main.activation_blob = { deviceKey = "bad" }  -- incomplete
+            main.activation_blob = { deviceKey = "bad" } -- incomplete
             main:saveSettings()
 
-            local result, err = main:restoreActivation()
+            local result = main:restoreActivation()
             assert.is_nil(result)
 
             -- restoreActivation calls clearActivation on failure
@@ -262,7 +252,9 @@ describe("main.lua helpers & orchestration", function()
                 error("network unreachable")
             end
 
-            local ok, err = pcall(function() main:createActivation() end)
+            local ok, err = pcall(function()
+                main:createActivation()
+            end)
             assert.is_false(ok)
             assert.is.truthy(tostring(err):find("network unreachable"))
 
@@ -350,6 +342,7 @@ describe("main.lua helpers & orchestration", function()
             local activation, reused = main:getActivation(false)
             assert.is_true(create_called)
             assert.is_false(reused)
+            assert.are.equal(fake_activation, activation)
 
             rmTmpDir(tmp)
         end)
@@ -378,7 +371,9 @@ describe("main.lua helpers & orchestration", function()
 
             -- Point DataStorage at our tmp dir for the cache path
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             main:saveFulfillmentMapping("urn:uuid:test-resource", "/books/my-book.epub")
 
@@ -393,7 +388,9 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("map-miss")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             local path = main:lookupFulfillmentMapping("urn:uuid:nonexistent")
             assert.is_nil(path)
@@ -406,7 +403,9 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("map-persist")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             main:saveFulfillmentMapping("urn:uuid:persist-test", "/books/persisted.epub")
 
@@ -424,7 +423,9 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("map-nil")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             local path = main:lookupFulfillmentMapping(nil)
             assert.is_nil(path)
@@ -437,7 +438,9 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("map-overwrite")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             main:saveFulfillmentMapping("urn:uuid:overwrite", "/books/old.epub")
             main:saveFulfillmentMapping("urn:uuid:overwrite", "/books/new.epub")
@@ -458,11 +461,15 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("cull-stale")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             -- Create a real file so its path survives culling
             local real_file = tmp .. "/real-book.epub"
-            local f = io.open(real_file, "w"); f:write("epub"); f:close()
+            local f = io.open(real_file, "w")
+            f:write("epub")
+            f:close()
 
             -- Save a stale entry (path never existed)
             main:saveFulfillmentMapping("urn:uuid:stale", "/nonexistent/book.epub")
@@ -486,13 +493,19 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("cull-all-live")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             -- Create real files
             local file_a = tmp .. "/book-a.epub"
             local file_b = tmp .. "/book-b.epub"
-            local f1 = io.open(file_a, "w"); f1:write("a"); f1:close()
-            local f2 = io.open(file_b, "w"); f2:write("b"); f2:close()
+            local f1 = io.open(file_a, "w")
+            f1:write("a")
+            f1:close()
+            local f2 = io.open(file_b, "w")
+            f2:write("b")
+            f2:close()
 
             main:saveFulfillmentMapping("urn:uuid:a", file_a)
             main:saveFulfillmentMapping("urn:uuid:b", file_b)
@@ -509,10 +522,14 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("cull-multi")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             local real_file = tmp .. "/real.epub"
-            local f = io.open(real_file, "w"); f:write("x"); f:close()
+            local f = io.open(real_file, "w")
+            f:write("x")
+            f:close()
 
             -- Seed two stale entries directly into the map
             local map = main:getFulfillmentMap()
@@ -537,10 +554,14 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("cull-persist")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             local real_file = tmp .. "/real.epub"
-            local f = io.open(real_file, "w"); f:write("y"); f:close()
+            local f = io.open(real_file, "w")
+            f:write("y")
+            f:close()
 
             -- Seed stale entry directly
             local map = main:getFulfillmentMap()
@@ -564,10 +585,14 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("cull-nonstring")
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             local real_file = tmp .. "/real.epub"
-            local f = io.open(real_file, "w"); f:write("z"); f:close()
+            local f = io.open(real_file, "w")
+            f:write("z")
+            f:close()
 
             -- Seed a non-string value (shouldn't happen in practice,
             -- but the cull loop should handle it gracefully)
@@ -623,7 +648,8 @@ describe("main.lua helpers & orchestration", function()
                     deviceUUID = "uuid",
                     fingerprint = "fp",
                     authCert = "cert",
-                }, false
+                },
+                    false
             end
 
             -- Stub fulfillment.process to fail
@@ -657,14 +683,16 @@ describe("main.lua helpers & orchestration", function()
                         deviceUUID = "uuid",
                         fingerprint = "fp",
                         authCert = "cert",
-                    }, true  -- reused
+                    },
+                        true -- reused
                 else
                     return {
                         creds = { user = "test2" },
                         deviceUUID = "uuid2",
                         fingerprint = "fp2",
                         authCert = "cert2",
-                    }, false
+                    },
+                        false
                 end
             end
 
@@ -688,7 +716,7 @@ describe("main.lua helpers & orchestration", function()
                 return { outputPath = "/test/book.epub" }
             end
 
-            local result, err = main:fulfillLoan("/test/book.acsm", {
+            local result = main:fulfillLoan("/test/book.acsm", {
                 title = "Test Book",
                 resourceId = "urn:uuid:test",
             })
@@ -709,7 +737,8 @@ describe("main.lua helpers & orchestration", function()
                     deviceUUID = "uuid",
                     fingerprint = "fp",
                     authCert = "cert",
-                }, false
+                },
+                    false
             end
 
             local fulfillment = require("adobe.fulfillment")
@@ -743,11 +772,12 @@ describe("main.lua helpers & orchestration", function()
                     deviceUUID = "uuid",
                     fingerprint = "fp",
                     authCert = "cert",
-                }, true  -- reused so retry path is eligible
+                },
+                    true -- reused so retry path is eligible
             end
 
             main.createActivation = function(self)
-                call_count = call_count + 100  -- should NOT be called
+                call_count = call_count + 100 -- should NOT be called
                 return {
                     creds = { user = "test2" },
                     deviceUUID = "uuid2",
@@ -763,12 +793,12 @@ describe("main.lua helpers & orchestration", function()
                 return nil, "network timeout"
             end
 
-            local result, err = main:fulfillLoan("/test/book.acsm", {
+            local result = main:fulfillLoan("/test/book.acsm", {
                 title = "Test Book",
                 resourceId = "urn:uuid:test",
             })
             assert.is_nil(result)
-            assert.are.equal(1, call_count)  -- createActivation not called (no +100)
+            assert.are.equal(1, call_count) -- createActivation not called (no +100)
 
             fulfillment.process = orig_process
             rmTmpDir(tmp)
@@ -796,7 +826,7 @@ describe("main.lua helpers & orchestration", function()
             local main, tmp = loadInTmpDir("openfile-wrongext")
             main:loadSettings()
 
-            local ok, err = pcall(function()
+            local ok = pcall(function()
                 main:openFile("/books/document.pdf")
             end)
             assert.is_true(ok)

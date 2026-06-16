@@ -3,7 +3,7 @@
 -- and HTTP to isolate specific code paths.
 
 describe("fulfillment_process", function()
-    local fulfillment, crypto, nc, koutil, util, epub, pdf
+    local fulfillment, crypto, koutil, util, epub, pdf
 
     -- Saved originals for stubbing
     local orig_extractCertFromPKCS12
@@ -26,7 +26,6 @@ describe("fulfillment_process", function()
     setup(function()
         fulfillment = require("adobe.fulfillment")
         crypto = require("adobe.util.crypto")
-        nc = require("adobe.util.nativecrypto")
         koutil = require("util")
         util = require("adobe.util.util")
         epub = require("adobe.epub")
@@ -57,11 +56,11 @@ describe("fulfillment_process", function()
 
         -- Default stubs: everything succeeds unless overridden
         fulfillment.extractCertFromPKCS12 = function()
-            return "dGVzdC1jZXJ0"  -- base64 "test-cert"
+            return "dGVzdC1jZXJ0" -- base64 "test-cert"
         end
         crypto.decodepkcs12 = function()
             local key = crypto.key.new()
-            return key.pkey  -- raw PKey
+            return key.pkey -- raw PKey
         end
         fulfillment.operatorAuth = function()
             operatorAuthCallCount = operatorAuthCallCount + 1
@@ -98,13 +97,16 @@ describe("fulfillment_process", function()
         local acsmPath = tmpDir .. "/test.acsm"
         local content
         if operatorURL then
-            content = string.format([[<?xml version="1.0"?>
+            content = string.format(
+                [[<?xml version="1.0"?>
 <fulfillmentToken xmlns="http://ns.adobe.com/adept">
   <operatorURL>%s</operatorURL>
   <resourceItemInfo>
     <resource>urn:uuid:test-resource</resource>
   </resourceItemInfo>
-</fulfillmentToken>]], operatorURL)
+</fulfillmentToken>]],
+                operatorURL
+            )
         else
             content = [[<?xml version="1.0"?>
 <fulfillmentToken xmlns="http://ns.adobe.com/adept">
@@ -123,14 +125,16 @@ describe("fulfillment_process", function()
         local deviceKey = crypto.deviceKey.new()
         local creds = {
             user = "urn:uuid:test-user",
-            pkcs12 = "dGVzdA==",  -- stubbed, so value doesn't matter
+            pkcs12 = "dGVzdA==", -- stubbed, so value doesn't matter
             deviceKey = deviceKey,
             licenseCert = "dGVzdC1saWNlbnNl",
             licenseKey = licenseKey,
             activationURL = "https://adeactivate.adobe.com/adept",
         }
         if overrides then
-            for k, v in pairs(overrides) do creds[k] = v end
+            for k, v in pairs(overrides) do
+                creds[k] = v
+            end
         end
         return creds
     end
@@ -139,7 +143,7 @@ describe("fulfillment_process", function()
     local function writeFileWithMagic(path, magicBytes)
         local f = io.open(path, "wb")
         f:write(magicBytes)
-        f:write(string.rep("\x00", 100))  -- padding
+        f:write(string.rep("\x00", 100)) -- padding
         f:close()
     end
 
@@ -336,7 +340,7 @@ describe("fulfillment_process", function()
     -- ================================================================
     describe("missing operator URL", function()
         it("returns error when ACSM has no operatorURL", function()
-            local acsmPath = writeAcsm(nil)  -- no operatorURL
+            local acsmPath = writeAcsm(nil) -- no operatorURL
             local outputPath = tmpDir .. "/output.epub"
             local creds = makeCreds()
 
@@ -372,7 +376,9 @@ describe("fulfillment_process", function()
             -- downloadBook writes an empty file and returns error
             fulfillment.downloadBook = function(url, path)
                 local f = io.open(path, "wb")
-                if f then f:close() end
+                if f then
+                    f:close()
+                end
                 return nil, "Book download failed: timeout"
             end
 
@@ -408,7 +414,9 @@ describe("fulfillment_process", function()
             -- downloadBook writes an empty file and reports success
             fulfillment.downloadBook = function(url, path)
                 local f = io.open(path, "wb")
-                if f then f:close() end
+                if f then
+                    f:close()
+                end
                 return true
             end
 

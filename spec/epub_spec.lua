@@ -4,7 +4,6 @@ local nativecrypto = require("adobe.util.nativecrypto")
 local zlib = require("adobe.util.zlib")
 
 describe("epub module", function()
-
     -- ---------------------------------------------------------------
     -- stripPkcs7Held (operates on FFI buffer)
     -- ---------------------------------------------------------------
@@ -95,7 +94,7 @@ describe("epub module", function()
 
         it("should strip multiple watermarks", function()
             local input = '<meta name="Adept.resource" content="urn:uuid:11111111-2222-3333-4444-555555555555"/>'
-                .. '<p>hello</p>'
+                .. "<p>hello</p>"
                 .. '<meta name="Adept.expected.resource" value="urn:uuid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/>'
             local result, count = epub._stripAdeptWatermarksFromText(input)
             assert.are.equal("<p>hello</p>", result)
@@ -183,12 +182,15 @@ describe("epub module", function()
         --- Helper: compress data with raw deflate (no zlib header)
         local function rawDeflate(data)
             local _ffi = require("ffi")
-            pcall(_ffi.cdef, [[
+            pcall(
+                _ffi.cdef,
+                [[
                 int deflateInit2_(z_stream *strm, int level, int method, int windowBits,
                                   int memLevel, int strategy, const char *version, int stream_size);
                 int deflate(z_stream *strm, int flush);
                 int deflateEnd(z_stream *strm);
-            ]])
+            ]]
+            )
             local libz
             if _ffi.loadlib then
                 libz = _ffi.loadlib("z", "1")
@@ -197,8 +199,7 @@ describe("epub module", function()
             end
 
             local stream = _ffi.new("z_stream[1]")
-            local rc = libz.deflateInit2_(stream, 6, 8, -15, 8, 0,
-                                           libz.zlibVersion(), _ffi.sizeof(stream[0]))
+            local rc = libz.deflateInit2_(stream, 6, 8, -15, 8, 0, libz.zlibVersion(), _ffi.sizeof(stream[0]))
             assert(rc == 0, "deflateInit2 failed: " .. tostring(rc))
 
             stream[0].next_in = _ffi.cast("Bytef *", data)
@@ -256,8 +257,7 @@ describe("epub module", function()
         end)
 
         it("should decrypt and decompress (noDecomp=false)", function()
-            local plaintext = "Decompression test: this text will be compressed then encrypted. "
-                .. string.rep("Padding data to ensure enough blocks. ", 20)
+            local plaintext = "Decompression test: this text will be compressed then encrypted. " .. string.rep("Padding data to ensure enough blocks. ", 20)
 
             -- Compress with raw deflate (what Adobe ADEPT uses)
             local deflated = rawDeflate(plaintext)

@@ -46,7 +46,9 @@ local function buildHashBuffer(node, nsMap, buf)
             attrs[#attrs + 1] = { ak = ak, av = av }
         end
     end
-    table.sort(attrs, function(a, b) return a.ak < b.ak end)
+    table.sort(attrs, function(a, b)
+        return a.ak < b.ak
+    end)
 
     for _, attr in ipairs(attrs) do
         buf[#buf + 1] = string.char(ASN_ATTRIBUTE)

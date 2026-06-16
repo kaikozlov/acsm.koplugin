@@ -29,7 +29,9 @@ describe("util", function()
 
         it("round-trips binary data with all byte values", function()
             local bytes = {}
-            for i = 0, 255 do bytes[i + 1] = string.char(i) end
+            for i = 0, 255 do
+                bytes[i + 1] = string.char(i)
+            end
             local input = table.concat(bytes)
             assert.are.equal(256, #input)
             local decoded = util.base64.decode(util.base64.encode(input))
@@ -104,7 +106,11 @@ describe("util", function()
         end)
 
         it("copies metatables", function()
-            local mt = { __index = function() return "meta" end }
+            local mt = {
+                __index = function()
+                    return "meta"
+                end,
+            }
             local orig = setmetatable({}, mt)
             local copy = util.deepTableCopy(orig)
             -- Metatable is copied (not same reference)
@@ -141,30 +147,29 @@ describe("util", function()
         it("returns ISO8601 UTC format", function()
             local result = util.expiration(10)
             -- Pattern: YYYY-MM-DDTHH:MM:SSZ
-            assert.is.truthy(result:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$"),
-                "Expected ISO8601 format, got: " .. result)
+            assert.is.truthy(result:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$"), "Expected ISO8601 format, got: " .. result)
         end)
 
         it("advances by the specified minutes", function()
             local before = os.time()
             local result = util.expiration(5)
-            local after = os.time()
-
             -- Parse the result back to a timestamp
-            local y, mo, d, h, mi, s = result:match(
-                "^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)Z$")
+            local y, mo, d, h, mi, s = result:match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)Z$")
             local resultTime = os.time({
-                year = tonumber(y), month = tonumber(mo), day = tonumber(d),
-                hour = tonumber(h), min = tonumber(mi), sec = tonumber(s),
-                isdst = false
+                year = tonumber(y),
+                month = tonumber(mo),
+                day = tonumber(d),
+                hour = tonumber(h),
+                min = tonumber(mi),
+                sec = tonumber(s),
+                isdst = false,
             })
 
             -- The result should be ~5 minutes (300s) in the future,
             -- with some tolerance for timezone offset calculation.
             -- We check it's at least 4 minutes and at most 6 minutes ahead.
             local diff = resultTime - before
-            assert.is_true(diff >= 240 and diff <= 360,
-                "Expected ~300s offset, got: " .. tostring(diff))
+            assert.is_true(diff >= 240 and diff <= 360, "Expected ~300s offset, got: " .. tostring(diff))
         end)
     end)
 

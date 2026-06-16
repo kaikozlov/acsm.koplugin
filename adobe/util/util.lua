@@ -33,7 +33,7 @@ end
 function util.deepTableCopy(orig)
     local orig_type = type(orig)
     local copy
-    if orig_type == 'table' then
+    if orig_type == "table" then
         copy = {}
         for orig_key, orig_value in next, orig, nil do
             copy[util.deepTableCopy(orig_key)] = util.deepTableCopy(orig_value)
@@ -50,7 +50,6 @@ function util.endpoint(base, path)
     endpoint.path = endpoint.path .. "/" .. path
     return endpoint
 end
-
 
 function util.expiration(minutes)
     local t = os.date("*t")

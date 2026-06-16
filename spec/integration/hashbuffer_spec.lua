@@ -12,7 +12,7 @@ describe("Adobe hash buffer (adobehash)", function()
 
     describe("buildHashBuffer", function()
         it("encodes a simple element with text content", function()
-            local xmlStr = '<root>Hello</root>'
+            local xmlStr = "<root>Hello</root>"
             local doc = dom.parse(xmlStr)
             local root = dom.firstElementChild(doc)
             local buf = {}
@@ -20,13 +20,13 @@ describe("Adobe hash buffer (adobehash)", function()
             local result = table.concat(buf)
 
             -- Expected: NS_TAG + ns("") + name("root") + CHILD + TEXT("Hello") + END_TAG
-            local expected = "\x01"            -- NS_TAG
-                .. "\x00\x00"                   -- namespace "" (length 0)
-                .. "\x00\x04root"              -- local name "root" (length 4)
-                .. "\x02"                       -- CHILD
-                .. "\x04"                       -- TEXT
-                .. "\x00\x05Hello"             -- text content (length 5)
-                .. "\x03"                       -- END_TAG
+            local expected = "\x01" -- NS_TAG
+                .. "\x00\x00" -- namespace "" (length 0)
+                .. "\x00\x04root" -- local name "root" (length 4)
+                .. "\x02" -- CHILD
+                .. "\x04" -- TEXT
+                .. "\x00\x05Hello" -- text content (length 5)
+                .. "\x03" -- END_TAG
             assert.are.equal(expected, result)
         end)
 
@@ -41,21 +41,21 @@ describe("Adobe hash buffer (adobehash)", function()
             -- Attributes sorted: alpha, beta
             -- alpha has no prefix → ns="" name="alpha"
             -- beta has no prefix → ns="" name="beta"
-            local expected = "\x01"            -- NS_TAG
-                .. "\x00\x00\x00\x04root"     -- namespace + name
-                .. "\x05"                       -- ATTRIBUTE
-                .. "\x00\x00\x00\x05alpha"    -- attr ns + name
-                .. "\x00\x011"                 -- attr value "1"
-                .. "\x05"                       -- ATTRIBUTE
-                .. "\x00\x00\x00\x04beta"     -- attr ns + name
-                .. "\x00\x012"                 -- attr value "2"
-                .. "\x02"                       -- CHILD
-                .. "\x01"                       -- NS_TAG for child
+            local expected = "\x01" -- NS_TAG
+                .. "\x00\x00\x00\x04root" -- namespace + name
+                .. "\x05" -- ATTRIBUTE
+                .. "\x00\x00\x00\x05alpha" -- attr ns + name
+                .. "\x00\x011" -- attr value "1"
+                .. "\x05" -- ATTRIBUTE
+                .. "\x00\x00\x00\x04beta" -- attr ns + name
+                .. "\x00\x012" -- attr value "2"
+                .. "\x02" -- CHILD
+                .. "\x01" -- NS_TAG for child
                 .. "\x00\x00\x00\x05child"
-                .. "\x02"                       -- CHILD
-                .. "\x04\x00\x04text"          -- TEXT "text"
-                .. "\x03"                       -- END_TAG child
-                .. "\x03"                       -- END_TAG root
+                .. "\x02" -- CHILD
+                .. "\x04\x00\x04text" -- TEXT "text"
+                .. "\x03" -- END_TAG child
+                .. "\x03" -- END_TAG root
             assert.are.equal(expected, result)
         end)
 
@@ -72,14 +72,15 @@ describe("Adobe hash buffer (adobehash)", function()
             -- Attribute "method": no prefix → ns="" name="method"
             local ADEPT = "http://ns.adobe.com/adept"
             local expected = "\x01"
-                .. "\x00\x19" .. ADEPT         -- namespace (length 25)
-                .. "\x00\x06signIn"            -- name (length 6)
-                .. "\x05"                       -- ATTRIBUTE
-                .. "\x00\x00"                   -- attr ns ""
-                .. "\x00\x06method"            -- attr name
-                .. "\x00\x03bar"               -- attr value
-                .. "\x02"                       -- CHILD
-                .. "\x03"                       -- END_TAG
+                .. "\x00\x19"
+                .. ADEPT -- namespace (length 25)
+                .. "\x00\x06signIn" -- name (length 6)
+                .. "\x05" -- ATTRIBUTE
+                .. "\x00\x00" -- attr ns ""
+                .. "\x00\x06method" -- attr name
+                .. "\x00\x03bar" -- attr value
+                .. "\x02" -- CHILD
+                .. "\x03" -- END_TAG
             assert.are.equal(expected, result)
         end)
 
@@ -120,7 +121,7 @@ describe("Adobe hash buffer (adobehash)", function()
         end)
 
         it("trims whitespace from text nodes", function()
-            local xmlStr = '<root>  hello world  </root>'
+            local xmlStr = "<root>  hello world  </root>"
             local doc = dom.parse(xmlStr)
             local root = dom.firstElementChild(doc)
             local buf = {}
@@ -152,15 +153,15 @@ describe("Adobe hash buffer (adobehash)", function()
         end)
 
         it("produces different hashes for different XML", function()
-            local hash_a = assert(adobehash.digest('<root><data>a</data></root>'))
-            local hash_b = assert(adobehash.digest('<root><data>b</data></root>'))
+            local hash_a = assert(adobehash.digest("<root><data>a</data></root>"))
+            local hash_b = assert(adobehash.digest("<root><data>b</data></root>"))
             assert.is_not.equal(hash_a, hash_b)
         end)
 
         it("handles invalid input gracefully", function()
             -- dom.parse may throw on invalid XML; digest should either
             -- return nil+err or let the error propagate (caller's responsibility)
-            local ok, hash, err = pcall(adobehash.digest, '<invalid')
+            local ok, hash, err = pcall(adobehash.digest, "<invalid")
             if ok then
                 assert.is_nil(hash)
                 assert.is.truthy(err)
@@ -169,7 +170,8 @@ describe("Adobe hash buffer (adobehash)", function()
         end)
 
         it("excludes signature from digest calculation", function()
-            local xmlWithSig = '<root xmlns:adept="http://ns.adobe.com/adept"><adept:data>payload</adept:data><adept:signature>ABC123==</adept:signature></root>'
+            local xmlWithSig =
+                '<root xmlns:adept="http://ns.adobe.com/adept"><adept:data>payload</adept:data><adept:signature>ABC123==</adept:signature></root>'
             local xmlNoSig = '<root xmlns:adept="http://ns.adobe.com/adept"><adept:data>payload</adept:data></root>'
             local hash_with = assert(adobehash.digest(xmlWithSig))
             local hash_without = assert(adobehash.digest(xmlNoSig))

@@ -27,8 +27,7 @@ describe("adobe", function()
                 pkcs12 = "test-pkcs12-blob",
             }
 
-            local result = adobe.serializeActivation(
-                creds, "device-uuid-123", "fingerprint-abc", "auth-cert-xyz")
+            local result = adobe.serializeActivation(creds, "device-uuid-123", "fingerprint-abc", "auth-cert-xyz")
 
             assert.are.equal("test-license-cert", result.licenseCert)
             assert.are.equal("urn:uuid:test-user", result.user)
@@ -90,8 +89,7 @@ describe("adobe", function()
                 pkcs12 = "roundtrip-pkcs12",
             }
 
-            local serialized = adobe.serializeActivation(
-                creds, "dev-uuid", "fp-hash", "auth-cert", "https://example.com/adept")
+            local serialized = adobe.serializeActivation(creds, "dev-uuid", "fp-hash", "auth-cert", "https://example.com/adept")
             local restored = adobe.restoreActivation(serialized)
 
             assert.is.truthy(restored)
@@ -143,8 +141,7 @@ describe("adobe", function()
                 username = "user",
                 pkcs12 = "pk",
             }
-            local serialized = adobe.serializeActivation(
-                creds, "dev", "fp", "ac", "https://custom.url/adept")
+            local serialized = adobe.serializeActivation(creds, "dev", "fp", "ac", "https://custom.url/adept")
             local restored = adobe.restoreActivation(serialized)
             assert.are.equal("https://custom.url/adept", restored.creds.activationURL)
         end)

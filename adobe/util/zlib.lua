@@ -4,7 +4,7 @@ local ffi = require("ffi")
 
 local isAndroid = pcall(require, "android")
 
-ffi.cdef [[
+ffi.cdef([[
 typedef void *voidpf;
 typedef unsigned char Bytef;
 typedef unsigned int uInt;
@@ -38,7 +38,7 @@ const char *zlibVersion(void);
 int inflateInit2_(z_stream *strm, int windowBits, const char *version, int stream_size);
 int inflate(z_stream *strm, int flush);
 int inflateEnd(z_stream *strm);
-]]
+]])
 
 --- Resolve the system library directory for a given architecture.
 -- Duplicated from nativecrypto.lua — cannot require() a shared module on Android
@@ -109,6 +109,8 @@ local Z_NO_FLUSH = 0
 local Z_BUF_ERROR = -5
 local CHUNK_SIZE = 32768
 
+local buildInflater
+
 function zlib.inflateRaw(data)
     local stream = ffi.new("z_stream[1]")
     stream[0].next_in = ffi.cast("Bytef *", data)
@@ -156,10 +158,7 @@ function zlib.rawInflater()
         return nil, "inflateInit2 failed: " .. tostring(rc)
     end
 
-    local function build_inflater()
-        return _buildInflater(stream)
-    end
-    return build_inflater()
+    return buildInflater(stream)
 end
 
 --- Create a streaming zlib inflater (handles zlib header, not raw deflate).
@@ -169,11 +168,10 @@ function zlib.inflater()
     if rc ~= Z_OK then
         return nil, "inflateInit2 failed: " .. tostring(rc)
     end
-    return _buildInflater(stream)
+    return buildInflater(stream)
 end
 
-function _buildInflater(stream)
-
+function buildInflater(stream)
     local outbuf = ffi.new("uint8_t[?]", CHUNK_SIZE)
     local finished = false
 
@@ -184,7 +182,9 @@ function _buildInflater(stream)
     -- @param chunk_len length of the chunk in bytes
     -- @param sink      function(ptr, len) called with each output block
     function inflater:update(chunk, chunk_len, sink)
-        if finished then return nil, "inflater already finalized" end
+        if finished then
+            return nil, "inflater already finalized"
+        end
         stream[0].next_in = ffi.cast("Bytef *", chunk)
         stream[0].avail_in = chunk_len
 
@@ -192,7 +192,7 @@ function _buildInflater(stream)
             stream[0].next_out = outbuf
             stream[0].avail_out = CHUNK_SIZE
 
-            rc = libz.inflate(stream, Z_NO_FLUSH)
+            local rc = libz.inflate(stream, Z_NO_FLUSH)
             local produced = CHUNK_SIZE - tonumber(stream[0].avail_out)
             if produced > 0 and sink then
                 local ok, err = sink(outbuf, produced)

@@ -35,7 +35,9 @@ local function uniqueCachePath(prefix, suffix)
     end
     local fallback = cacheDir .. "/" .. prefix .. "-" .. tostring(os.time()) .. suffix
     local f = io.open(fallback, "w")
-    if f then f:close() end
+    if f then
+        f:close()
+    end
     return fallback
 end
 
@@ -90,7 +92,6 @@ local function collectNotifyUrls(node, nsMap, urls)
     return urls
 end
 
-local buildAdobeHashBuffer = adobehash.buildHashBuffer
 local adobeDigest = adobehash.digest
 
 local function signXmlBody(xmlString, signingKey)
@@ -109,7 +110,9 @@ end
 function fulfillment.extractCertFromPKCS12(pkcs12B64, deviceKey)
     local pass = util.base64.encode(deviceKey.key)
     local decoded, err = nativecrypto.parse_pkcs12(util.base64.decode(pkcs12B64), pass)
-    if err then return nil, err end
+    if err then
+        return nil, err
+    end
     return util.base64.encode(decoded.cert_der)
 end
 
@@ -117,11 +120,11 @@ function fulfillment.operatorAuth(operatorURL, userUUID, userCert, licenseCert, 
     local authURL = operatorURL:gsub("/Fulfill$", ""):gsub("/+$", "") .. "/Auth"
     local body = '<?xml version="1.0"?>\n'
     body = body .. '<adept:credentials xmlns:adept="' .. ADEPT .. '">\n'
-    body = body .. '  <adept:user>' .. userUUID .. '</adept:user>\n'
-    body = body .. '  <adept:certificate>' .. userCert .. '</adept:certificate>\n'
-    body = body .. '  <adept:licenseCertificate>' .. licenseCert .. '</adept:licenseCertificate>\n'
-    body = body .. '  <adept:authenticationCertificate>' .. authCert .. '</adept:authenticationCertificate>\n'
-    body = body .. '</adept:credentials>'
+    body = body .. "  <adept:user>" .. userUUID .. "</adept:user>\n"
+    body = body .. "  <adept:certificate>" .. userCert .. "</adept:certificate>\n"
+    body = body .. "  <adept:licenseCertificate>" .. licenseCert .. "</adept:licenseCertificate>\n"
+    body = body .. "  <adept:authenticationCertificate>" .. authCert .. "</adept:authenticationCertificate>\n"
+    body = body .. "</adept:credentials>"
 
     logger.info("[ACSM] Operator auth:", authURL)
     local resp, err = adeptPost(authURL, body)
@@ -141,14 +144,16 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
 
     local body = '<?xml version="1.0"?>\n'
     body = body .. '<adept:licenseServiceRequest xmlns:adept="' .. ADEPT .. '" identity="user">\n'
-    body = body .. '  <adept:operatorURL>' .. dom.xmlEscape(operatorURL) .. '</adept:operatorURL>\n'
-    body = body .. '  <adept:nonce>' .. nonce .. '</adept:nonce>\n'
-    body = body .. '  <adept:expiration>' .. expiration .. '</adept:expiration>\n'
-    body = body .. '  <adept:user>' .. userUUID .. '</adept:user>\n'
-    local sig, sigErr = signXmlBody(body .. '</adept:licenseServiceRequest>', signingKey)
-    if not sig then return nil, "InitLicenseService signing failed: " .. sigErr end
-    body = body .. '  <adept:signature>' .. sig .. '</adept:signature>\n'
-    body = body .. '</adept:licenseServiceRequest>'
+    body = body .. "  <adept:operatorURL>" .. dom.xmlEscape(operatorURL) .. "</adept:operatorURL>\n"
+    body = body .. "  <adept:nonce>" .. nonce .. "</adept:nonce>\n"
+    body = body .. "  <adept:expiration>" .. expiration .. "</adept:expiration>\n"
+    body = body .. "  <adept:user>" .. userUUID .. "</adept:user>\n"
+    local sig, sigErr = signXmlBody(body .. "</adept:licenseServiceRequest>", signingKey)
+    if not sig then
+        return nil, "InitLicenseService signing failed: " .. sigErr
+    end
+    body = body .. "  <adept:signature>" .. sig .. "</adept:signature>\n"
+    body = body .. "</adept:licenseServiceRequest>"
 
     local initURL = activationURL:gsub("/+$", "") .. "/InitLicenseService"
     logger.info("[ACSM] InitLicenseService:", initURL)
@@ -171,36 +176,44 @@ function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signin
 
     local acsmParsed = xml.deserialize(acsmContent)
     local token = acsmParsed.fulfillmentToken
-    if not token then return nil, "No fulfillmentToken in ACSM" end
+    if not token then
+        return nil, "No fulfillmentToken in ACSM"
+    end
 
     local operatorURL = token.operatorURL
-    if type(operatorURL) == "table" then operatorURL = operatorURL[1] end
-    if not operatorURL then return nil, "No operatorURL in ACSM" end
+    if type(operatorURL) == "table" then
+        operatorURL = operatorURL[1]
+    end
+    if not operatorURL then
+        return nil, "No operatorURL in ACSM"
+    end
 
     local acsmXml = acsmContent:gsub("^<%?xml[^?]*%?>%s*", ""):gsub("%s+$", "")
     local body = '<?xml version="1.0"?>'
     body = body .. '<adept:fulfill xmlns:adept="' .. ADEPT .. '">'
-    body = body .. '<adept:user>' .. userUUID .. '</adept:user>'
-    body = body .. '<adept:device>' .. deviceUUID .. '</adept:device>'
-    body = body .. '<adept:deviceType>standalone</adept:deviceType>'
+    body = body .. "<adept:user>" .. userUUID .. "</adept:user>"
+    body = body .. "<adept:device>" .. deviceUUID .. "</adept:device>"
+    body = body .. "<adept:deviceType>standalone</adept:deviceType>"
     body = body .. acsmXml
-    body = body .. '<adept:targetDevice>'
-    body = body .. '<adept:softwareVersion>' .. adobe.VERSION.hobbes .. '</adept:softwareVersion>'
-    body = body .. '<adept:clientOS>' .. adobe.VERSION.os .. '</adept:clientOS>'
-    body = body .. '<adept:clientLocale>en</adept:clientLocale>'
-    body = body .. '<adept:clientVersion>' .. adobe.VERSION.version .. '</adept:clientVersion>'
-    body = body .. '<adept:deviceType>standalone</adept:deviceType>'
-    body = body .. '<adept:productName>ADOBE Digitial Editions</adept:productName>'
-    body = body .. '<adept:fingerprint>' .. fingerprint .. '</adept:fingerprint>'
-    body = body .. '<adept:activationToken>'
-    body = body .. '<adept:user>' .. userUUID .. '</adept:user>'
-    body = body .. '<adept:device>' .. deviceUUID .. '</adept:device>'
-    body = body .. '</adept:activationToken>'
-    body = body .. '</adept:targetDevice>'
-    body = body .. '</adept:fulfill>'
+    body = body .. "<adept:targetDevice>"
+    body = body .. "<adept:softwareVersion>" .. adobe.VERSION.hobbes .. "</adept:softwareVersion>"
+    body = body .. "<adept:clientOS>" .. adobe.VERSION.os .. "</adept:clientOS>"
+    body = body .. "<adept:clientLocale>en</adept:clientLocale>"
+    body = body .. "<adept:clientVersion>" .. adobe.VERSION.version .. "</adept:clientVersion>"
+    body = body .. "<adept:deviceType>standalone</adept:deviceType>"
+    body = body .. "<adept:productName>ADOBE Digitial Editions</adept:productName>"
+    body = body .. "<adept:fingerprint>" .. fingerprint .. "</adept:fingerprint>"
+    body = body .. "<adept:activationToken>"
+    body = body .. "<adept:user>" .. userUUID .. "</adept:user>"
+    body = body .. "<adept:device>" .. deviceUUID .. "</adept:device>"
+    body = body .. "</adept:activationToken>"
+    body = body .. "</adept:targetDevice>"
+    body = body .. "</adept:fulfill>"
 
     local sig, sigErr = signXmlBody(body, signingKey)
-    if not sig then return nil, "Fulfill signing failed: " .. sigErr end
+    if not sig then
+        return nil, "Fulfill signing failed: " .. sigErr
+    end
     body = body:gsub("</adept:fulfill>$", "<adept:signature>" .. sig .. "</adept:signature></adept:fulfill>")
 
     local fulfillURL = operatorURL:gsub("/+$", "") .. "/Fulfill"
@@ -256,11 +269,14 @@ function fulfillment.downloadBook(srcUrl, outputPath)
 
     socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
     local ok, code = pcall(function()
-        return socket.skip(1, http.request({
-            url = srcUrl,
-            sink = sink,
-            headers = { ["User-Agent"] = socketutil.USER_AGENT },
-        }))
+        return socket.skip(
+            1,
+            http.request({
+                url = srcUrl,
+                sink = sink,
+                headers = { ["User-Agent"] = socketutil.USER_AGENT },
+            })
+        )
     end)
     socketutil:reset_timeout()
     if not ok then
@@ -279,7 +295,9 @@ function fulfillment.decryptBookKey(encryptedKeyB64, licenseKey)
         return nil, "Missing encryptedKey"
     end
     local decrypted, err = licenseKey.pkey:decrypt(util.base64.decode(encryptedKeyB64), nativecrypto.RSA_PKCS1_PADDING)
-    if err then return nil, err end
+    if err then
+        return nil, err
+    end
     return decrypted
 end
 
@@ -289,14 +307,16 @@ function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
 
     local body = '<?xml version="1.0"?>\n'
     body = body .. '<adept:notification xmlns:adept="' .. ADEPT .. '">\n'
-    body = body .. '  <adept:user>' .. userUUID .. '</adept:user>\n'
-    body = body .. '  <adept:device>' .. deviceUUID .. '</adept:device>\n'
-    body = body .. '  <adept:nonce>' .. nonce .. '</adept:nonce>\n'
-    body = body .. '  <adept:expiration>' .. expiration .. '</adept:expiration>\n'
-    local sig, sigErr = signXmlBody(body .. '</adept:notification>', signingKey)
-    if not sig then return nil, sigErr end
-    body = body .. '  <adept:signature>' .. sig .. '</adept:signature>\n'
-    body = body .. '</adept:notification>'
+    body = body .. "  <adept:user>" .. userUUID .. "</adept:user>\n"
+    body = body .. "  <adept:device>" .. deviceUUID .. "</adept:device>\n"
+    body = body .. "  <adept:nonce>" .. nonce .. "</adept:nonce>\n"
+    body = body .. "  <adept:expiration>" .. expiration .. "</adept:expiration>\n"
+    local sig, sigErr = signXmlBody(body .. "</adept:notification>", signingKey)
+    if not sig then
+        return nil, sigErr
+    end
+    body = body .. "  <adept:signature>" .. sig .. "</adept:signature>\n"
+    body = body .. "</adept:notification>"
 
     logger.info("[ACSM] Notify:", notifyURL)
     adeptPost(notifyURL, body)
@@ -308,11 +328,15 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     logger.info("[ACSM] fulfillment.process: acsmPath=", acsmPath, "outputPath=", outputPath)
 
     local userUUID = creds.user
-    if type(userUUID) == "table" then userUUID = userUUID[1] end
+    if type(userUUID) == "table" then
+        userUUID = userUUID[1]
+    end
 
     logger.info("[ACSM] fulfillment.process: extracting user cert from PKCS12...")
     local userCert, certErr = fulfillment.extractCertFromPKCS12(creds.pkcs12, creds.deviceKey)
-    if not userCert then return nil, "Failed to extract cert: " .. certErr end
+    if not userCert then
+        return nil, "Failed to extract cert: " .. certErr
+    end
     logger.info("[ACSM] fulfillment.process: got user cert")
 
     logger.info("[ACSM] fulfillment.process: reading ACSM file...")
@@ -322,8 +346,12 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     end
     local acsmParsed = xml.deserialize(acsmContent)
     local operatorURL = acsmParsed.fulfillmentToken.operatorURL
-    if type(operatorURL) == "table" then operatorURL = operatorURL[1] end
-    if not operatorURL then return nil, "No operatorURL in ACSM" end
+    if type(operatorURL) == "table" then
+        operatorURL = operatorURL[1]
+    end
+    if not operatorURL then
+        return nil, "No operatorURL in ACSM"
+    end
     logger.info("[ACSM] fulfillment.process: operatorURL=", operatorURL)
 
     logger.info("[ACSM] fulfillment.process: decoding pkcs12...")
@@ -331,21 +359,26 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     local activationURL = creds.activationURL or "https://adeactivate.adobe.com/adept"
     if not creds.activationURL and creds.activationXml then
         local activationParsed = xml.deserialize(creds.activationXml)
-        local activationToken = activationParsed.activationInfo and activationParsed.activationInfo.activationToken
-            or activationParsed.activationToken
+        local activationToken = activationParsed.activationInfo and activationParsed.activationInfo.activationToken or activationParsed.activationToken
         if activationToken and activationToken.activationURL then
             activationURL = activationToken.activationURL
-            if type(activationURL) == "table" then activationURL = activationURL[1] end
+            if type(activationURL) == "table" then
+                activationURL = activationURL[1]
+            end
         end
     end
 
     logger.info("[ACSM] fulfillment.process: doing operator auth...")
     local ok, err = fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
-    if not ok then return nil, err end
+    if not ok then
+        return nil, err
+    end
     logger.info("[ACSM] fulfillment.process: operator auth done, init license service...")
 
     ok, err = fulfillment.initLicenseService(activationURL, operatorURL, userUUID, pkcs12Key)
-    if not ok then return nil, err end
+    if not ok then
+        return nil, err
+    end
     logger.info("[ACSM] fulfillment.process: license service initialized, fulfilling...")
 
     local result
@@ -355,7 +388,9 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
         fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
         result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
     end
-    if err then return nil, err end
+    if err then
+        return nil, err
+    end
     logger.info("[ACSM] fulfillment.process: fulfillment OK, download URL=", result.src)
 
     -- Download the book (detect format from magic bytes)
@@ -371,7 +406,9 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     -- Detect format from magic bytes
     local magicF = io.open(tmpFile, "rb")
     local magic = magicF and magicF:read(10) or ""
-    if magicF then magicF:close() end
+    if magicF then
+        magicF:close()
+    end
 
     local isPdf = (magic:sub(1, 5) == "%PDF-")
     local isEpub = (magic:sub(1, 4) == "PK" .. string.char(0x03, 0x04))
@@ -379,7 +416,7 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     logger.info("[ACSM] fulfillment.process: format detected: ", isPdf and "PDF" or (isEpub and "EPUB" or "unknown"))
 
     local decryptedInfo, decryptErr
-    local bookKey  -- may be nil for PDF (extracted internally)
+    local bookKey -- may be nil for PDF (extracted internally)
     if isPdf then
         logger.info("[ACSM] fulfillment.process: decrypting PDF...")
         local pdf = require("adobe.pdf")
@@ -390,6 +427,7 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
         decryptedInfo, decryptErr = pdf.decryptAdobePdf(tmpFile, outputPath, nil, creds.licenseKey, result.encryptedKey)
     else
         logger.info("[ACSM] fulfillment.process: decrypting book key...")
+        local bookKeyErr
         bookKey, bookKeyErr = fulfillment.decryptBookKey(result.encryptedKey, creds.licenseKey)
         if not bookKey then
             os.remove(tmpFile)

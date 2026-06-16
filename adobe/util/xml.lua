@@ -40,7 +40,7 @@ end
 
 -- add the xml version header to the string
 function xml.addHeader(string)
-    return "<?xml version=\"1.0\"?>\n" .. string
+    return '<?xml version="1.0"?>\n' .. string
 end
 
 -- shorthand for creating an xml request for adobe

@@ -1,19 +1,26 @@
 local naming = require("adobe.util.naming")
 
-
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
 
 local function split_path_name(file)
-    if not file or file == "" then return "", "" end
-    if not file:find("/") then return "", file end
+    if not file or file == "" then
+        return "", ""
+    end
+    if not file:find("/") then
+        return "", file
+    end
     return file:match("(.*/)(.*)")
 end
 
 local function split_name_suffix(file)
-    if not file or file == "" then return "", "" end
-    if not file:find("%.") then return file, "" end
+    if not file or file == "" then
+        return "", ""
+    end
+    if not file:find("%.") then
+        return file, ""
+    end
     return file:match("(.*)%.(.*)")
 end
 
@@ -34,7 +41,6 @@ local function mktemp()
     return d
 end
 
-
 -- ---------------------------------------------------------------------------
 -- sanitizeTitle
 -- ---------------------------------------------------------------------------
@@ -44,8 +50,7 @@ describe("naming.sanitizeTitle", function()
     end)
 
     it("replaces colons", function()
-        assert.equal("Bliss One Grump's Search",
-            naming.sanitizeTitle("Bliss: One Grump's Search"))
+        assert.equal("Bliss One Grump's Search", naming.sanitizeTitle("Bliss: One Grump's Search"))
     end)
 
     it("replaces slashes", function()
@@ -96,18 +101,15 @@ describe("naming.sanitizeTitle", function()
     end)
 
     it("preserves unicode text", function()
-        assert.equal("Die Leiden des jungen Werther",
-            naming.sanitizeTitle("Die Leiden des jungen Werther"))
+        assert.equal("Die Leiden des jungen Werther", naming.sanitizeTitle("Die Leiden des jungen Werther"))
     end)
 
     it("preserves French accented chars", function()
-        assert.equal("La Chartreuse de Parme",
-            naming.sanitizeTitle("La Chartreuse de Parme"))
+        assert.equal("La Chartreuse de Parme", naming.sanitizeTitle("La Chartreuse de Parme"))
     end)
 
     it("handles colons in subtitles", function()
-        assert.equal("God Is A Salesman Learn from the Master",
-            naming.sanitizeTitle("God Is A Salesman: Learn from the Master"))
+        assert.equal("God Is A Salesman Learn from the Master", naming.sanitizeTitle("God Is A Salesman: Learn from the Master"))
     end)
 end)
 
@@ -130,7 +132,9 @@ describe("findUniquePath", function()
         -- Path exists; try numbered variants
         local dir, filename = split_path_name(path)
         local name, ext = split_name_suffix(filename)
-        if ext ~= "" then ext = "." .. ext end
+        if ext ~= "" then
+            ext = "." .. ext
+        end
 
         for i = 1, 999 do
             local candidate = dir .. name .. " (" .. i .. ")" .. ext

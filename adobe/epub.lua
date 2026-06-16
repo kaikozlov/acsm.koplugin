@@ -15,11 +15,11 @@ local XMLENC = "http://www.w3.org/2001/04/xmlenc#"
 local AES128_CBC = "http://www.w3.org/2001/04/xmlenc#aes128-cbc"
 local AES128_CBC_UNCOMPRESSED = "http://ns.adobe.com/adept/xmlenc#aes128-cbc-uncompressed"
 
-local CHUNK_SIZE = 65536  -- 64KB chunks for streaming decrypt
+local CHUNK_SIZE = 65536 -- 64KB chunks for streaming decrypt
 local WATERMARK_SCAN_BYTES = 16384
 local FILE_IOFBF = 0
 
-require("ffi/posix_h")  -- FILE, fopen, fwrite, fclose, strerror
+require("ffi/posix_h") -- FILE, fopen, fwrite, fclose, strerror
 pcall(ffi.cdef, "int setvbuf(FILE *stream, char *buf, int mode, size_t size);")
 
 local function removeTree(path)
@@ -146,7 +146,6 @@ local function openBufferedOutput(path, size)
     return writer
 end
 
-
 --- Decrypt an Adobe ADEPT encrypted file in-place using streaming.
 -- Reads the input in CHUNK_SIZE chunks, decrypts via streaming AES-CBC,
 -- optionally inflates via streaming zlib, and writes to a temp file.
@@ -192,7 +191,7 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
     -- 2. Strip PKCS7 padding from the final block
     -- Strategy: skip first 16, hold back last 16 for PKCS7 check.
     -- Held bytes are flushed when new data arrives (proving they aren't final).
-    local skipRemaining = 16  -- bytes to skip from start of decrypted stream
+    local skipRemaining = 16 -- bytes to skip from start of decrypted stream
     local held = ffi.new("uint8_t[16]")
     local heldLen = 0
 
@@ -223,7 +222,9 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
         -- Flush previously held bytes (they're not the final block since more data arrived)
         if heldLen > 0 then
             local ok, err = writeThrough(held, heldLen)
-            if not ok then return nil, err end
+            if not ok then
+                return nil, err
+            end
             heldLen = 0
         end
 
@@ -243,7 +244,9 @@ local function decryptAdeptEntryFile(fullPath, bookKey, noDecomp)
     local readErr = nil
     while true do
         local chunk = inFile:read(CHUNK_SIZE)
-        if not chunk then break end
+        if not chunk then
+            break
+        end
 
         local ok, updateErr = decryptor:update(chunk, processDecrypted)
         if not ok then
@@ -323,7 +326,9 @@ local function ensureDir(path)
     local parent = path:match("^(.*)/[^/]+$")
     if parent and parent ~= "" and lfs.attributes(parent, "mode") ~= "directory" then
         local ok, err = ensureDir(parent)
-        if not ok then return nil, err end
+        if not ok then
+            return nil, err
+        end
     end
 
     local ok, err = lfs.mkdir(path)
@@ -357,7 +362,7 @@ end
 
 local function repackEpub(workDir, outputPath)
     os.remove(outputPath)
-    local writer = Archiver.Writer:new{}
+    local writer = Archiver.Writer:new({})
     if not writer:open(outputPath, "epub") then
         return nil, writer.err or "Could not open EPUB writer"
     end
@@ -561,8 +566,12 @@ function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
         outputPath = outputPath,
         decryptedEntries = (function()
             local count = 0
-            for _ in pairs(parsed.encrypted) do count = count + 1 end
-            for _ in pairs(parsed.encryptedForceNoDecomp) do count = count + 1 end
+            for _ in pairs(parsed.encrypted) do
+                count = count + 1
+            end
+            for _ in pairs(parsed.encryptedForceNoDecomp) do
+                count = count + 1
+            end
             return count
         end)(),
         remainingEncryptionXml = parsed.rewrittenXml ~= nil,

@@ -9,7 +9,7 @@ local ASN = {
     ATTRIBUTE = 5, -- ATTRIBUTE
     END_ATTRIBUTES = 2, -- CHILD
     BEGIN_ELEMENT = 1, -- NS_TAG
-    END_ELEMENT = 3 -- END_TAG
+    END_ELEMENT = 3, -- END_TAG
 }
 
 function ASN.byte(byte)
@@ -26,12 +26,10 @@ end
 
 function ASN.string(str)
     local length = string.len(str)
-    return ASN.bytes(
-        {
-            math.floor(length / 256), -- upper length byte
-            bit.band(length, 0xFF) -- lower length byte
-        }
-    ) .. str -- contents of string
+    return ASN.bytes({
+        math.floor(length / 256), -- upper length byte
+        bit.band(length, 0xFF), -- lower length byte
+    }) .. str -- contents of string
 end
 
 function ASN.namespacedTag(namespace, name)
@@ -70,11 +68,11 @@ function ASN.element(name, content)
     out = out .. ASN.byte(ASN.END_ATTRIBUTES)
 
     -- FIXME: how does it work if we have attributes, but are a text node?
-    if type(content) == 'string' then
+    if type(content) == "string" then
         -- FIXME: support greater than 32k (chunking)
         out = out .. ASN.byte(ASN.TEXT_NODE)
         out = out .. ASN.string(content)
-    elseif type(content) == 'table' then
+    elseif type(content) == "table" then
         -- FIXME: is this the right way to sort elements?
         for k, v in util.orderedPairs(content) do
             out = out .. ASN.element(k, v)

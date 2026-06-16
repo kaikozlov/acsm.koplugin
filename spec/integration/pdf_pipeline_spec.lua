@@ -36,23 +36,23 @@ describe("PDF decryptAdobePdf pipeline (synthetic PDF)", function()
         local offsets = {}
 
         -- Header
-        lines[#lines+1] = "%PDF-1.4\n"
+        lines[#lines + 1] = "%PDF-1.4\n"
 
         -- Object 1: Catalog
         offsets[1] = #table.concat(lines)
-        lines[#lines+1] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+        lines[#lines + 1] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
 
         -- Object 2: Pages
         offsets[2] = #table.concat(lines)
-        lines[#lines+1] = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+        lines[#lines + 1] = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
 
         -- Object 3: Page
         offsets[3] = #table.concat(lines)
-        lines[#lines+1] = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n"
+        lines[#lines + 1] = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n"
 
         -- Object 4: Encrypt dict (EBX_HANDLER)
         offsets[4] = #table.concat(lines)
-        lines[#lines+1] = "4 0 obj\n<< /Filter /EBX_HANDLER /V 2 /EBX_ENCRYPTIONTYPE 6 /Length 128 >>\nendobj\n"
+        lines[#lines + 1] = "4 0 obj\n<< /Filter /EBX_HANDLER /V 2 /EBX_ENCRYPTIONTYPE 6 /Length 128 >>\nendobj\n"
 
         -- Object 5: String object with encrypted content
         offsets[5] = #table.concat(lines)
@@ -63,23 +63,23 @@ describe("PDF decryptAdobePdf pipeline (synthetic PDF)", function()
         for i = 1, #encString do
             hexStr = hexStr .. string.format("%02X", encString:byte(i))
         end
-        lines[#lines+1] = "5 0 obj\n<" .. hexStr .. ">\nendobj\n"
+        lines[#lines + 1] = "5 0 obj\n<" .. hexStr .. ">\nendobj\n"
 
         -- xref table
         local xrefOffset = #table.concat(lines)
-        lines[#lines+1] = "xref\n"
-        lines[#lines+1] = "0 6\n"
-        lines[#lines+1] = string.format("%010d %05d f \n", 0, 65535)
+        lines[#lines + 1] = "xref\n"
+        lines[#lines + 1] = "0 6\n"
+        lines[#lines + 1] = string.format("%010d %05d f \n", 0, 65535)
         for id = 1, 5 do
-            lines[#lines+1] = string.format("%010d %05d n \n", offsets[id], 0)
+            lines[#lines + 1] = string.format("%010d %05d n \n", offsets[id], 0)
         end
 
         -- trailer
-        lines[#lines+1] = "trailer\n"
-        lines[#lines+1] = "<< /Size 6 /Root 1 0 R /Encrypt 4 0 R /ID [<AABB> <CCDD>] >>\n"
-        lines[#lines+1] = "startxref\n"
-        lines[#lines+1] = tostring(xrefOffset) .. "\n"
-        lines[#lines+1] = "%%EOF\n"
+        lines[#lines + 1] = "trailer\n"
+        lines[#lines + 1] = "<< /Size 6 /Root 1 0 R /Encrypt 4 0 R /ID [<AABB> <CCDD>] >>\n"
+        lines[#lines + 1] = "startxref\n"
+        lines[#lines + 1] = tostring(xrefOffset) .. "\n"
+        lines[#lines + 1] = "%%EOF\n"
 
         local pdfContent = table.concat(lines)
         local pdfPath = tmpDir .. "/test_encrypted.pdf"
@@ -130,8 +130,7 @@ describe("PDF decryptAdobePdf pipeline (synthetic PDF)", function()
         local inputPath = buildEncryptedPdf(tmpDir, bookKey)
         local outputPath = tmpDir .. "/decrypted.pdf"
 
-        local result, err = pdf.decryptAdobePdf(
-            inputPath, outputPath, nil, licenseKey, encBookKeyB64)
+        local result, err = pdf.decryptAdobePdf(inputPath, outputPath, nil, licenseKey, encBookKeyB64)
         assert.is.truthy(result, "decryptAdobePdf (licenseKey) failed: " .. tostring(err))
         assert.is_true(result.decryptedObjects > 0)
 

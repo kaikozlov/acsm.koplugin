@@ -17,7 +17,9 @@ end
 function crypto.deviceKey:encrypt(data)
     local iv = assert(nativecrypto.rand_bytes(16))
     local encrypted, err = nativecrypto.aes_cbc_encrypt(self.key, iv, data, false)
-    if err ~= nil then error(err) end
+    if err ~= nil then
+        error(err)
+    end
     return iv .. encrypted
 end
 
@@ -25,7 +27,9 @@ function crypto.deviceKey:decrypt(data)
     local iv = data:sub(1, 16)
     local encrypted = data:sub(17)
     local decrypted, err = nativecrypto.aes_cbc_decrypt(self.key, iv, encrypted, false)
-    if err ~= nil then error(err) end
+    if err ~= nil then
+        error(err)
+    end
     return decrypted
 end
 
@@ -36,7 +40,9 @@ function crypto.encryptLogin(username, password, deviceKey, authCert)
     buffer = buffer .. string.char(password:len())
     buffer = buffer .. password
     local encrypted, err = nativecrypto.encrypt_with_cert(util.base64.decode(authCert), buffer)
-    if err ~= nil then error(err) end
+    if err ~= nil then
+        error(err)
+    end
     return util.base64.encode(encrypted)
 end
 
@@ -66,7 +72,9 @@ function crypto.key.new(k)
     else
         key, err = nativecrypto.generate_rsa_key(1025, 65537)
     end
-    if err ~= nil then error(err) end
+    if err ~= nil then
+        error(err)
+    end
 
     local wrapped = {
         pkey = key,
@@ -78,20 +86,26 @@ end
 
 function crypto.key:topkcs8()
     local pkcs8, err = self.pkey:to_pkcs8_der()
-    if err ~= nil then error(err) end
+    if err ~= nil then
+        error(err)
+    end
     return pkcs8
 end
 
 function crypto.decodepkcs12(pk, deviceKey)
     local pass = util.base64.encode(deviceKey.key)
     local decoded, err = nativecrypto.parse_pkcs12(util.base64.decode(pk), pass)
-    if err ~= nil then error(err) end
+    if err ~= nil then
+        error(err)
+    end
     return decoded.key
 end
 
 local function sign(key, data)
     local sig, err = key:sign_raw(data, nativecrypto.RSA_PKCS1_PADDING)
-    if err ~= nil then error(err) end
+    if err ~= nil then
+        error(err)
+    end
     return util.base64.encode(sig)
 end
 

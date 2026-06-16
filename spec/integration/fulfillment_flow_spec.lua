@@ -4,13 +4,12 @@
 -- Validates XML signing, response parsing, download → decrypt pipeline.
 
 describe("Fulfillment flow (stubbed network)", function()
-    local fulfillment, crypto, nc, koutil
+    local fulfillment, crypto, nc
 
     setup(function()
         fulfillment = require("adobe.fulfillment")
         crypto = require("adobe.util.crypto")
         nc = require("adobe.util.nativecrypto")
-        koutil = require("util")
     end)
 
     describe("decryptBookKey", function()
@@ -44,9 +43,6 @@ describe("Fulfillment flow (stubbed network)", function()
             -- We need a device key and pkcs12 blob. The simplest way is to
             -- create fresh crypto material and then test the extraction.
             local deviceKey = crypto.deviceKey.new()
-            local authKey = crypto.key.new()
-            local util = require("adobe.util.util")
-
             -- Build a minimal self-signed PKCS12 (requires the key to export)
             -- Since we can't easily generate a PKCS12 without the full sign-in
             -- flow, we'll test that the function at least handles invalid input
@@ -85,9 +81,9 @@ describe("Fulfillment flow (stubbed network)", function()
 
         it("operatorAuth sends correct XML structure", function()
             local userUUID = "urn:uuid:test-user-1234"
-            local userCert = "dGVzdC1jZXJ0"  -- base64 "test-cert"
-            local licenseCert = "dGVzdC1saWNlbnNl"  -- base64 "test-license"
-            local authCert = "dGVzdC1hdXRo"  -- base64 "test-auth"
+            local userCert = "dGVzdC1jZXJ0" -- base64 "test-cert"
+            local licenseCert = "dGVzdC1saWNlbnNl" -- base64 "test-license"
+            local authCert = "dGVzdC1hdXRo" -- base64 "test-auth"
             local operatorURL = "https://test.example.com/fulfillment"
 
             local ok, err = fulfillment.operatorAuth(operatorURL, userUUID, userCert, licenseCert, authCert)
@@ -113,9 +109,7 @@ describe("Fulfillment flow (stubbed network)", function()
                 return 1, 200, {}
             end
 
-            local ok, err = fulfillment.operatorAuth(
-                "https://test.example.com/fulfillment",
-                "urn:uuid:test-user", "cert", "lcert", "acert")
+            local ok, err = fulfillment.operatorAuth("https://test.example.com/fulfillment", "urn:uuid:test-user", "cert", "lcert", "acert")
             assert.is_nil(ok)
             assert.is.truthy(err)
             assert.is.truthy(err:find("Operator auth failed"))
@@ -125,14 +119,10 @@ describe("Fulfillment flow (stubbed network)", function()
             -- fulfillment functions expect a raw nativecrypto RSA key
             -- (as returned by crypto.decodepkcs12), not the crypto.key wrapper
             local keyWrapper = crypto.key.new()
-            local signingKey = keyWrapper.pkey  -- raw RSA key with :sign_raw()
+            local signingKey = keyWrapper.pkey -- raw RSA key with :sign_raw()
             local userUUID = "urn:uuid:test-user-5678"
 
-            local ok, err = fulfillment.initLicenseService(
-                "https://adeactivate.adobe.com/adept",
-                "https://test.example.com/fulfillment",
-                userUUID,
-                signingKey)
+            local ok, err = fulfillment.initLicenseService("https://adeactivate.adobe.com/adept", "https://test.example.com/fulfillment", userUUID, signingKey)
             assert.is.truthy(ok, "initLicenseService failed: " .. tostring(err))
 
             -- Verify the request
@@ -166,12 +156,8 @@ describe("Fulfillment flow (stubbed network)", function()
 
         it("sends signed notification to notify URL", function()
             local keyWrapper = crypto.key.new()
-            local signingKey = keyWrapper.pkey  -- raw RSA key
-            local ok, err = fulfillment.notify(
-                "https://test.example.com/notify",
-                "urn:uuid:test-user",
-                "urn:uuid:test-device",
-                signingKey)
+            local signingKey = keyWrapper.pkey -- raw RSA key
+            local ok, err = fulfillment.notify("https://test.example.com/notify", "urn:uuid:test-user", "urn:uuid:test-device", signingKey)
             assert.is.truthy(ok, "notify failed: " .. tostring(err))
             assert.are.equal(1, #captured_requests)
             local req = captured_requests[1]

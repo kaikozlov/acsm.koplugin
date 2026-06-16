@@ -4,7 +4,7 @@
 # No local toolchain required — just Docker (and `just`).
 #
 # Quick start:
-#   just setup     # pull the image (one-time)
+#   just setup     # install git hooks and pull the image (one-time)
 #   just test      # run all tests
 #   just build     # build a release zip (versioned from _meta.lua)
 #   just shell     # drop into the container
@@ -24,6 +24,8 @@ mount := "-v " + justfile_directory() + ":/opt/plugin -e PLUGIN_NAME=" + plugin_
 
 # Standard run (no network)
 run := "docker run --rm " + sdl_env + " " + mount + " " + image
+# Standard run from the plugin directory (so .luacheckrc/.stylua.toml are loaded)
+run_plugin := "docker run --rm -w /opt/plugin " + sdl_env + " " + mount + " " + image
 # Network-enabled run (for e2e tests that hit real servers)
 run_network := "docker run --rm --network=host " + sdl_env + " " + mount + " " + image
 # Interactive run
@@ -42,10 +44,17 @@ default:
 # Setup
 # =============================================================================
 
-# Pull the koplugin-dev image
+# Configure Git to use the checked-in hooks and pull the koplugin-dev image
 [group('setup')]
-setup:
+setup: install-hooks
     docker pull {{ image }}
+
+# Configure Git to use the checked-in hooks
+[group('setup')]
+install-hooks:
+    git config core.hooksPath .githooks
+    chmod +x .githooks/pre-commit
+    @echo "Installed git hooks from .githooks/"
 
 # =============================================================================
 # Testing
@@ -86,10 +95,20 @@ test-filter filter:
 # Linting
 # =============================================================================
 
-# Run luacheck inside the container
+# Run luacheck on project Lua code (excludes tools/, dependencies/, REFERENCE/)
 [group('lint')]
 lint:
-    {{ run }} luacheck /opt/plugin
+    {{ run_plugin }} luacheck adobe spec main.lua _meta.lua
+
+# Check Lua formatting with Stylua
+[group('lint')]
+fmt-check:
+    {{ run_plugin }} stylua --check adobe spec main.lua _meta.lua
+
+# Format Lua code with Stylua
+[group('lint')]
+fmt:
+    {{ run_plugin }} stylua adobe spec main.lua _meta.lua
 
 # =============================================================================
 # Build

@@ -16,11 +16,9 @@
 -- to any object transparently produces decrypted data.
 
 local logger = require("logger")
-local lfs = require("libs/libkoreader-lfs")
 
 local pdfdoc = require("adobe.pdf.pdfdoc")
 local pdfcrypt = require("adobe.pdf.pdfcrypt")
-local pdfparser = require("adobe.pdf.parser")
 local writer = require("adobe.pdf.writer")
 local rc4 = require("adobe.pdf.rc4")
 local nativecrypto = require("adobe.util.nativecrypto")
@@ -29,6 +27,8 @@ local xml = require("adobe.util.xml")
 local util = require("adobe.util.util")
 
 local pdf = {}
+
+local removeHardeningFromRights
 
 ------------------------------------------------------------------------
 -- Rights XML helpers
@@ -76,14 +76,16 @@ local function extractRights(doc, encParam)
         if type(encParam) == "table" then
             if encParam.dic then
                 hasStream = true
-                for k in pairs(encParam.dic) do keyList[#keyList+1] = tostring(k) end
+                for k in pairs(encParam.dic) do
+                    keyList[#keyList + 1] = tostring(k)
+                end
             else
-                for k in pairs(encParam) do keyList[#keyList+1] = tostring(k) end
+                for k in pairs(encParam) do
+                    keyList[#keyList + 1] = tostring(k)
+                end
             end
         end
-        local diag = "No ADEPT_LICENSE in encryption dict"
-            .. (hasStream and " (stream)" or "")
-            .. " keys=[" .. table.concat(keyList, ",") .. "]"
+        local diag = "No ADEPT_LICENSE in encryption dict" .. (hasStream and " (stream)" or "") .. " keys=[" .. table.concat(keyList, ",") .. "]"
         return nil, diag
     end
 
@@ -110,16 +112,21 @@ end
 -- Handles both namespaced ({http://ns.adobe.com/adept}resource) and
 -- bare (resource) element names.
 local function findRightsText(t, name)
-    if type(t) ~= "table" then return nil end
+    if type(t) ~= "table" then
+        return nil
+    end
 
     -- Try direct access with common name variants
-    local direct = t[name]
-        or t["{" .. "http://ns.adobe.com/adept" .. "}" .. name]
+    local direct = t[name] or t["{" .. "http://ns.adobe.com/adept" .. "}" .. name]
     if direct then
-        if type(direct) == "string" then return direct end
+        if type(direct) == "string" then
+            return direct
+        end
         if type(direct) == "table" then
             local text = direct[1] or direct._text
-            if type(text) == "string" then return text end
+            if type(text) == "string" then
+                return text
+            end
         end
     end
 
@@ -127,7 +134,9 @@ local function findRightsText(t, name)
     for _, v in pairs(t) do
         if type(v) == "table" then
             local found = findRightsText(v, name)
-            if found then return found end
+            if found then
+                return found
+            end
         end
     end
     return nil
@@ -140,7 +149,9 @@ end
 -- @return table rights document (for hardening removal)
 local function extractEncryptedKey(rights)
     local function findEncryptedKey(t)
-        if type(t) ~= "table" then return nil end
+        if type(t) ~= "table" then
+            return nil
+        end
         -- Check for encryptedKey with possible namespace prefixes
         for k, v in pairs(t) do
             if type(k) == "string" and k:find("encryptedKey", 1, true) then
@@ -171,7 +182,9 @@ local function extractEncryptedKey(rights)
         for _, v in pairs(t) do
             if type(v) == "table" then
                 local found, kt = findEncryptedKey(v)
-                if found then return found, kt end
+                if found then
+                    return found, kt
+                end
             end
         end
         return nil
@@ -203,7 +216,6 @@ local function extractBookKey(doc, licenseKey, fulfillmentEncryptedKey)
     end
 
     local bookKeyRaw = nil
-    local keyType = "0"
 
     -- Try to extract ADEPT_LICENSE from the PDF (supports hardening removal)
     local rights, rightsErr = extractRights(doc, encParam)
@@ -213,16 +225,17 @@ local function extractBookKey(doc, licenseKey, fulfillmentEncryptedKey)
         if encKeyB64 then
             logger.info("[ACSM] pdf: encryptedKey found in PDF, keyType=", kt)
             bookKeyRaw = util.base64.decode(encKeyB64)
-            keyType = kt
 
             -- Handle hardening if needed
-            if tonumber(keyType) > 2 then
-                bookKeyRaw = removeHardeningFromRights(bookKeyRaw, keyType, rightsDoc)
+            if tonumber(kt) > 2 then
+                bookKeyRaw = removeHardeningFromRights(bookKeyRaw, kt, rightsDoc)
                 if not bookKeyRaw then
                     return nil, "Hardening removal failed"
                 end
             end
         end
+    elseif rightsErr then
+        logger.warn("[ACSM] pdf: could not extract ADEPT_LICENSE:", rightsErr)
     end
 
     -- Fallback: use fulfillment response encrypted key
@@ -252,7 +265,7 @@ local function extractBookKey(doc, licenseKey, fulfillmentEncryptedKey)
 end
 
 --- Extract UUIDs from rights XML and call removeHardening.
-local function removeHardeningFromRights(bookKeyRaw, keyType, rights)
+function removeHardeningFromRights(bookKeyRaw, keyType, rights)
     local resourceUUID = findRightsText(rights, "resource")
     local deviceUUID = findRightsText(rights, "device")
     local fulfillmentUUID = findRightsText(rights, "fulfillment")
@@ -268,11 +281,7 @@ local function removeHardeningFromRights(bookKeyRaw, keyType, rights)
     fulfillmentUUID = fulfillmentUUID:sub(1, 36)
 
     logger.info("[ACSM] pdf: removing ADEPT hardening (keyType=", keyType, ")")
-    return pdfcrypt.removeHardening(
-        bookKeyRaw, keyType,
-        resourceUUID, deviceUUID, fulfillmentUUID,
-        nativecrypto.aes_cbc_decrypt
-    )
+    return pdfcrypt.removeHardening(bookKeyRaw, keyType, resourceUUID, deviceUUID, fulfillmentUUID, nativecrypto.aes_cbc_decrypt)
 end
 
 ------------------------------------------------------------------------
@@ -294,11 +303,15 @@ end
 local function make_aes_decipher(bookKey, genkey_fn)
     return function(objid, genno, data)
         local key = genkey_fn(bookKey, objid, genno)
-        if #data < 32 then return data end -- too short for AES (16 IV + padding)
+        if #data < 32 then
+            return data
+        end -- too short for AES (16 IV + padding)
         local iv = data:sub(1, 16)
         local encrypted = data:sub(17)
         local decrypted = nativecrypto.aes_cbc_decrypt(key, iv, encrypted, true)
-        if not decrypted then return data end
+        if not decrypted then
+            return data
+        end
         -- Remove PKCS7 padding (unpad from ineptpdf.py)
         if #decrypted > 0 then
             local padLen = decrypted:byte(#decrypted)
@@ -371,10 +384,10 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey, licenseKey, fulfill
     end
 
     -- 4. Log ADEPT_LICENSE for diagnostics
-    local adeptLicense, ebxBookid = doc:extractAdeptLicense()
+    local adeptLicense = doc:extractAdeptLicense()
     if adeptLicense then
         logger.info("[ACSM] pdf: ADEPT_LICENSE present in PDF")
-        local rights, rightsErr = extractRights(doc, {ADEPT_LICENSE = adeptLicense})
+        local rights = extractRights(doc, { ADEPT_LICENSE = adeptLicense })
         if rights then
             local encKeyB64, keyType = extractEncryptedKey(rights)
             if encKeyB64 then
@@ -430,10 +443,14 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey, licenseKey, fulfill
 
     for _, objid in ipairs(ids) do
         -- Skip the Encrypt dict itself (ineptpdf.py removes it from trailer)
-        if objid == doc.encrypt_objid then goto continue end
+        if objid == doc.encrypt_objid then
+            goto continue
+        end
 
         local obj = doc:getobj(objid)
-        if not obj then goto continue end
+        if not obj then
+            goto continue
+        end
 
         -- Write immediately — after this call, `obj` can be GC'd
         w:writeObject(objid, obj)

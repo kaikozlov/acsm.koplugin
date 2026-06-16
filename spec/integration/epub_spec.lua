@@ -5,7 +5,7 @@
 
 describe("EPUB internals", function()
     it("_stripPkcs7Held strips padding of 1", function()
-        local ffi  = require("ffi")
+        local ffi = require("ffi")
         local epub = require("adobe.epub")
         local buf = ffi.new("uint8_t[?]", 6)
         ffi.copy(buf, "hello" .. string.char(1), 6)
@@ -38,19 +38,22 @@ describe("EPUB internals", function()
 end)
 
 describe("EPUB decryption pipeline (real crypto + real zip I/O)", function()
-    local epub, nc, ffi, lfs, koutil
+    local epub, nc, koutil
 
     --- Raw deflate using zlib FFI (no zlib header, matching inflate -15).
     -- This mirrors what Adobe ADEPT does: deflate content before encrypting.
     local function rawDeflate(data)
         local _ffi = require("ffi")
         -- Declare deflate functions if not yet declared
-        pcall(_ffi.cdef, [[
+        pcall(
+            _ffi.cdef,
+            [[
             int deflateInit2_(z_stream *strm, int level, int method, int windowBits,
                               int memLevel, int strategy, const char *version, int stream_size);
             int deflate(z_stream *strm, int flush);
             int deflateEnd(z_stream *strm);
-        ]])
+        ]]
+        )
         -- Load zlib (same discovery logic as adobe/util/zlib.lua)
         local libz
         if _ffi.loadlib then
@@ -61,8 +64,7 @@ describe("EPUB decryption pipeline (real crypto + real zip I/O)", function()
 
         local stream = _ffi.new("z_stream[1]")
         -- Z_DEFLATED=8, windowBits=-15 (raw), memLevel=8, Z_DEFAULT_STRATEGY=0
-        local rc = libz.deflateInit2_(stream, 6, 8, -15, 8, 0,
-                                       libz.zlibVersion(), _ffi.sizeof(stream[0]))
+        local rc = libz.deflateInit2_(stream, 6, 8, -15, 8, 0, libz.zlibVersion(), _ffi.sizeof(stream[0]))
         assert(rc == 0, "deflateInit2 failed: " .. tostring(rc))
 
         stream[0].next_in = _ffi.cast("Bytef *", data)
@@ -90,8 +92,6 @@ describe("EPUB decryption pipeline (real crypto + real zip I/O)", function()
     setup(function()
         epub = require("adobe.epub")
         nc = require("adobe.util.nativecrypto")
-        ffi = require("ffi")
-        lfs = require("libs/libkoreader-lfs")
         koutil = require("util")
     end)
 
@@ -121,15 +121,19 @@ have enough data to work with across multiple AES blocks.</p>
         koutil.writeToFile("application/epub+zip", workDir .. "/mimetype")
 
         -- container.xml
-        koutil.writeToFile([[<?xml version="1.0" encoding="UTF-8"?>
+        koutil.writeToFile(
+            [[<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
     <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
   </rootfiles>
-</container>]], workDir .. "/META-INF/container.xml")
+</container>]],
+            workDir .. "/META-INF/container.xml"
+        )
 
         -- content.opf
-        koutil.writeToFile([[<?xml version="1.0" encoding="UTF-8"?>
+        koutil.writeToFile(
+            [[<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="uid">urn:uuid:test-12345</dc:identifier>
@@ -139,7 +143,9 @@ have enough data to work with across multiple AES blocks.</p>
     <item id="ch1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
   <spine><itemref idref="ch1"/></spine>
-</package>]], workDir .. "/OEBPS/content.opf")
+</package>]],
+            workDir .. "/OEBPS/content.opf"
+        )
 
         -- Encrypt the chapter content using Adobe ADEPT format:
         -- 16 random prefix bytes + deflate(plaintext) + PKCS7 padding, then AES-128-CBC
@@ -213,7 +219,7 @@ have enough data to work with across multiple AES blocks.</p>
         -- Pack into an EPUB zip
         local Archiver = require("ffi/archiver")
         local epubPath = tmpDir .. "/test_encrypted.epub"
-        local writer = Archiver.Writer:new{}
+        local writer = Archiver.Writer:new({})
         assert(writer:open(epubPath, "epub"))
         local mtime = os.time()
 
@@ -251,7 +257,9 @@ have enough data to work with across multiple AES blocks.</p>
             if entry.mode == "file" then
                 local fullPath = destDir .. "/" .. entry.path
                 local parent = fullPath:match("^(.*)/[^/]+$")
-                if parent then koutil.makePath(parent) end
+                if parent then
+                    koutil.makePath(parent)
+                end
                 reader:extractToPath(entry.path, fullPath)
             end
         end
@@ -319,18 +327,24 @@ have enough data to work with across multiple AES blocks.</p>
         koutil.makePath(workDir .. "/OPS/Text")
 
         koutil.writeToFile("application/epub+zip", workDir .. "/mimetype")
-        koutil.writeToFile([[<?xml version="1.0" encoding="UTF-8"?>
+        koutil.writeToFile(
+            [[<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
     <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
   </rootfiles>
-</container>]], workDir .. "/META-INF/container.xml")
-        koutil.writeToFile([[<?xml version="1.0" encoding="UTF-8"?>
+</container>]],
+            workDir .. "/META-INF/container.xml"
+        )
+        koutil.writeToFile(
+            [[<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Nested Book</dc:title></metadata>
   <manifest><item id="ch1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/></manifest>
   <spine><itemref idref="ch1"/></spine>
-</package>]], workDir .. "/OPS/content.opf")
+</package>]],
+            workDir .. "/OPS/content.opf"
+        )
 
         local deflated = rawDeflate(CHAPTER_TEXT)
         local payload = string.rep("\0", 16) .. deflated
@@ -339,17 +353,20 @@ have enough data to work with across multiple AES blocks.</p>
         local encrypted = assert(nc.aes_cbc_encrypt(TEST_KEY, string.rep("\0", 16), padded, true))
         koutil.writeToFile(encrypted, workDir .. "/OPS/Text/chapter1.xhtml")
 
-        koutil.writeToFile([[<?xml version="1.0" encoding="UTF-8"?>
+        koutil.writeToFile(
+            [[<?xml version="1.0" encoding="UTF-8"?>
 <encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
             xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
   <enc:EncryptedData>
     <enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/>
     <enc:CipherData><enc:CipherReference URI="OPS/Text/chapter1.xhtml"/></enc:CipherData>
   </enc:EncryptedData>
-</encryption>]], workDir .. "/META-INF/encryption.xml")
+</encryption>]],
+            workDir .. "/META-INF/encryption.xml"
+        )
 
         local inputPath = tmpDir .. "/test_nested.epub"
-        local writer = Archiver.Writer:new{}
+        local writer = Archiver.Writer:new({})
         assert(writer:open(inputPath, "epub"))
         local mtime = os.time()
         writer:setZipCompression("store")

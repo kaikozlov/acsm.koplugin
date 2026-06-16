@@ -46,10 +46,8 @@ end
 ------------------------------------------------------------------------
 -- Sentinel keyword objects used for dict/array delimiters
 ------------------------------------------------------------------------
-local KEYWORD_ARRAY_BEGIN = parser.keyword("[")
-local KEYWORD_ARRAY_END   = parser.keyword("]")
-local KEYWORD_DICT_BEGIN  = parser.keyword("<<")
-local KEYWORD_DICT_END    = parser.keyword(">>")
+local KEYWORD_DICT_BEGIN = parser.keyword("<<")
+local KEYWORD_DICT_END = parser.keyword(">>")
 
 ------------------------------------------------------------------------
 -- Character classification helpers
@@ -61,45 +59,37 @@ local function is_whitespace(c)
 end
 
 local function is_eol(c)
-    return c == 10 or c == 13  -- \n or \r
+    return c == 10 or c == 13 -- \n or \r
 end
 
 local function is_digit(c)
-    return c >= 48 and c <= 57  -- '0'-'9'
+    return c >= 48 and c <= 57 -- '0'-'9'
 end
 
 local function is_hex(c)
-    return (c >= 48 and c <= 57)     -- 0-9
-        or (c >= 65 and c <= 70)     -- A-F
-        or (c >= 97 and c <= 102)    -- a-f
+    return (c >= 48 and c <= 57) -- 0-9
+        or (c >= 65 and c <= 70) -- A-F
+        or (c >= 97 and c <= 102) -- a-f
 end
 
 local function is_alpha(c)
     return (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
 end
 
-local function is_regular(c)
-    -- Regular character: not a delimiter and not whitespace
-    -- PDF delimiters: ( ) < > [ ] { } / %
-    return not is_whitespace(c)
-        and c ~= 40 and c ~= 41   -- ( )
-        and c ~= 60 and c ~= 62   -- < >
-        and c ~= 91 and c ~= 93   -- [ ]
-        and c ~= 123 and c ~= 125 -- { }
-        and c ~= 47               -- /
-        and c ~= 37               -- %
-end
-
 --- Check if a byte is a valid end for a name/literal token.
 local function is_name_delimiter(c)
     return is_whitespace(c)
-        or c == 35   -- #
-        or c == 47   -- /
-        or c == 37   -- %
-        or c == 40 or c == 41   -- ( )
-        or c == 60 or c == 62   -- < >
-        or c == 91 or c == 93   -- [ ]
-        or c == 123 or c == 125 -- { }
+        or c == 35 -- #
+        or c == 47 -- /
+        or c == 37 -- %
+        or c == 40
+        or c == 41 -- ( )
+        or c == 60
+        or c == 62 -- < >
+        or c == 91
+        or c == 93 -- [ ]
+        or c == 123
+        or c == 125 -- { }
 end
 
 --- Check if a byte is a valid end for a keyword token.
@@ -112,9 +102,15 @@ end
 ------------------------------------------------------------------------
 
 local function hex_char_to_nibble(c)
-    if c >= 48 and c <= 57 then return c - 48 end      -- '0'-'9'
-    if c >= 65 and c <= 70 then return c - 55 end       -- 'A'-'F'
-    if c >= 97 and c <= 102 then return c - 87 end      -- 'a'-'f'
+    if c >= 48 and c <= 57 then
+        return c - 48
+    end -- '0'-'9'
+    if c >= 65 and c <= 70 then
+        return c - 55
+    end -- 'A'-'F'
+    if c >= 97 and c <= 102 then
+        return c - 87
+    end -- 'a'-'f'
     return nil
 end
 
@@ -147,22 +143,18 @@ end
 -- Octal decode helper
 ------------------------------------------------------------------------
 
-local function octal_to_byte(s)
-    return string.char(tonumber(s, 8))
-end
-
 ------------------------------------------------------------------------
 -- Escape sequence table (match byte -> result byte)
 ------------------------------------------------------------------------
 local ESC_TABLE = {
-    [98]  = 8,    -- \b
-    [116] = 9,    -- \t
-    [110] = 10,   -- \n
-    [102] = 12,   -- \f
-    [114] = 13,   -- \r
-    [40]  = 40,   -- \(
-    [41]  = 41,   -- \)
-    [92]  = 92,   -- \\
+    [98] = 8, -- \b
+    [116] = 9, -- \t
+    [110] = 10, -- \n
+    [102] = 12, -- \f
+    [114] = 13, -- \r
+    [40] = 40, -- \(
+    [41] = 41, -- \)
+    [92] = 92, -- \\
 }
 
 ------------------------------------------------------------------------
@@ -239,15 +231,19 @@ end
 --- Get byte at current charpos (does NOT advance).
 function parser:_peekbyte()
     if self.charpos >= #self.buf then
-        if not self:_fillbuf() then return nil end
+        if not self:_fillbuf() then
+            return nil
+        end
     end
-    return string.byte(self.buf, self.charpos + 1)  -- Lua 1-indexed
+    return string.byte(self.buf, self.charpos + 1) -- Lua 1-indexed
 end
 
 --- Get byte at current charpos and advance by 1.
 function parser:_getbyte()
     local b = self:_peekbyte()
-    if b then self.charpos = self.charpos + 1 end
+    if b then
+        self.charpos = self.charpos + 1
+    end
     return b
 end
 
@@ -307,9 +303,11 @@ function parser:_parse_main()
         local b = self:_peekbyte()
         if b == nil then
             self._parse_state = "main"
-            return nil  -- EOF
+            return nil -- EOF
         end
-        if not is_whitespace(b) then break end
+        if not is_whitespace(b) then
+            break
+        end
         self:_advance(1)
     end
 
@@ -317,21 +315,21 @@ function parser:_parse_main()
     self._tokenstart = self.bufpos + self.charpos
 
     local b = self:_peekbyte()
-    self:_advance(1)  -- consume the character
+    self:_advance(1) -- consume the character
 
-    if b == 37 then  -- '%': comment
+    if b == 37 then -- '%': comment
         self._token = ""
         self._parse_state = "comment"
-        return false  -- continue parsing
+        return false -- continue parsing
     end
 
-    if b == 47 then  -- '/': name/literal
+    if b == 47 then -- '/': name/literal
         self._token = ""
         self._parse_state = "literal"
         return false
     end
 
-    if b == 45 or b == 43 then  -- '-' or '+': could be number start
+    if b == 45 or b == 43 then -- '-' or '+': could be number start
         self._token = string.char(b)
         self._parse_state = "number"
         return false
@@ -343,7 +341,7 @@ function parser:_parse_main()
         return false
     end
 
-    if b == 46 then  -- '.': decimal
+    if b == 46 then -- '.': decimal
         self._token = string.char(b)
         self._parse_state = "decimal"
         return false
@@ -355,20 +353,20 @@ function parser:_parse_main()
         return false
     end
 
-    if b == 40 then  -- '(': literal string
+    if b == 40 then -- '(': literal string
         self._token = ""
         self._paren = 1
         self._parse_state = "string"
         return false
     end
 
-    if b == 60 then  -- '<': hex string or dict begin
+    if b == 60 then -- '<': hex string or dict begin
         self._token = ""
         self._parse_state = "wopen"
         return false
     end
 
-    if b == 62 then  -- '>': dict end or wclose
+    if b == 62 then -- '>': dict end or wclose
         self._token = ""
         self._parse_state = "wclose"
         return false
@@ -391,7 +389,7 @@ function parser:_parse_comment()
         self:_advance(1)
         if is_eol(b) then
             self._parse_state = "main"
-            return false  -- continue to main
+            return false -- continue to main
         end
     end
 end
@@ -405,7 +403,7 @@ function parser:_parse_literal()
             self._parse_state = "main"
             return nil
         end
-        if b == 35 then  -- '#': hex escape in name
+        if b == 35 then -- '#': hex escape in name
             self:_advance(1)
             self._hex = ""
             self._parse_state = "literal_hex"
@@ -443,7 +441,7 @@ function parser:_parse_literal_hex()
                 self._token = self._token .. string.char(tonumber(self._hex, 16))
             end
             self._parse_state = "literal"
-            return false  -- don't consume b, let literal handle it
+            return false -- don't consume b, let literal handle it
         end
     end
 end
@@ -454,11 +452,13 @@ function parser:_parse_number()
         if b == nil then
             -- EOF: emit integer
             local n = tonumber(self._token)
-            if n then self:_add_token(n) end
+            if n then
+                self:_add_token(n)
+            end
             self._parse_state = "main"
             return nil
         end
-        if b == 46 then  -- '.': switch to decimal
+        if b == 46 then -- '.': switch to decimal
             self:_advance(1)
             self._token = self._token .. "."
             self._parse_state = "decimal"
@@ -470,7 +470,9 @@ function parser:_parse_number()
         else
             -- End of integer
             local n = tonumber(self._token)
-            if n then self:_add_token(n) end
+            if n then
+                self:_add_token(n)
+            end
             self._parse_state = "main"
             return true
         end
@@ -483,7 +485,9 @@ function parser:_parse_decimal()
         if b == nil then
             -- EOF: emit decimal
             local n = tonumber(self._token)
-            if n then self:_add_token(n) end
+            if n then
+                self:_add_token(n)
+            end
             self._parse_state = "main"
             return nil
         end
@@ -493,7 +497,9 @@ function parser:_parse_decimal()
         else
             -- End of decimal
             local n = tonumber(self._token)
-            if n then self:_add_token(n) end
+            if n then
+                self:_add_token(n)
+            end
             self._parse_state = "main"
             return true
         end
@@ -539,14 +545,14 @@ function parser:_parse_string()
             return nil
         end
         self:_advance(1)
-        if b == 92 then  -- '\': escape
+        if b == 92 then -- '\': escape
             self._oct = ""
             self._parse_state = "string_1"
             return false
-        elseif b == 40 then  -- '(': nested open
+        elseif b == 40 then -- '(': nested open
             self._paren = self._paren + 1
             self._token = self._token .. "("
-        elseif b == 41 then  -- ')': close
+        elseif b == 41 then -- ')': close
             self._paren = self._paren - 1
             if self._paren > 0 then
                 self._token = self._token .. ")"
@@ -576,7 +582,7 @@ function parser:_parse_string_1()
             return nil
         end
         -- Octal digit?
-        if b >= 48 and b <= 55 and #self._oct < 3 then  -- '0'-'7'
+        if b >= 48 and b <= 55 and #self._oct < 3 then -- '0'-'7'
             self:_advance(1)
             self._oct = self._oct .. string.char(b)
         else
@@ -584,7 +590,7 @@ function parser:_parse_string_1()
             if #self._oct > 0 then
                 self._token = self._token .. string.char(tonumber(self._oct, 8))
                 self._parse_state = "string"
-                return false  -- don't consume b
+                return false -- don't consume b
             end
             -- Named escape
             self:_advance(1)
@@ -607,7 +613,7 @@ function parser:_parse_wopen()
         self._parse_state = "main"
         return nil
     end
-    if b == 60 then  -- '<': dict begin '<<'
+    if b == 60 then -- '<': dict begin '<<'
         self:_advance(1)
         self:_add_token(KEYWORD_DICT_BEGIN)
         self._parse_state = "main"
@@ -618,9 +624,9 @@ function parser:_parse_wopen()
         self._parse_state = "hexstring"
         return false
     end
-    if b == 62 then  -- '>': empty hex string '<>'
+    if b == 62 then -- '>': empty hex string '<>'
         self:_advance(1)
-        self:_add_token("")  -- empty string
+        self:_add_token("") -- empty string
         self._parse_state = "main"
         return true
     end
@@ -632,7 +638,7 @@ end
 function parser:_parse_wclose()
     -- After '>': must be '>' for dict end '>>'
     local b = self:_peekbyte()
-    if b == 62 then  -- '>': dict end '>>'
+    if b == 62 then -- '>': dict end '>>'
         self:_advance(1)
         self:_add_token(KEYWORD_DICT_END)
         self._parse_state = "main"
@@ -653,7 +659,7 @@ function parser:_parse_hexstring()
             self._parse_state = "main"
             return nil
         end
-        if b == 62 then  -- '>': end of hex string
+        if b == 62 then -- '>': end of hex string
             self:_advance(1)
             self:_add_token(decode_hex_string(self._token))
             self._parse_state = "main"
@@ -700,14 +706,18 @@ function parser:nexttoken()
                 self.buf = ""
                 self.charpos = 0
                 self:_parse_step()
-                if #self._tokens > 0 then break end
+                if #self._tokens > 0 then
+                    break
+                end
             end
             return nil
         end
         local result = self:_parse_step()
         if result == nil then
             -- EOF signal from parse step
-            if #self._tokens > 0 then break end
+            if #self._tokens > 0 then
+                break
+            end
             return nil
         end
     end
@@ -741,7 +751,7 @@ function parser:nextline()
             -- We saw \r last time; check for \n
             if self.charpos < #self.buf then
                 local c = string.byte(self.buf, self.charpos + 1)
-                if c == 10 then  -- \n
+                if c == 10 then -- \n
                     linebuf[#linebuf + 1] = "\n"
                     self.charpos = self.charpos + 1
                 end
@@ -767,10 +777,7 @@ function parser:nextline()
             end
         end
 
-        if not found_eol then
-            -- Consumed entire buffer, need more
-            -- (loop will refill)
-        elseif not eol then
+        if found_eol and not eol then
             -- Found \n, done
             break
         end
@@ -795,7 +802,7 @@ function parser:revreadlines()
             local split_pos = 0
             for i = #buf, 1, -1 do
                 local c = string.byte(buf, i)
-                if c == 13 or c == 10 then  -- \r or \n
+                if c == 13 or c == 10 then -- \r or \n
                     split_pos = i
                     break
                 end
@@ -865,16 +872,6 @@ local function push(self, ...)
 end
 
 --- Pop n objects from the current stack.
-local function pop(self, n)
-    local objs = {}
-    local len = #self._curstack
-    for i = len - n + 1, len do
-        objs[#objs + 1] = self._curstack[i]
-        self._curstack[i] = nil
-    end
-    return objs
-end
-
 --- Pop all objects from the current stack.
 local function popall(self)
     local objs = self._curstack
@@ -968,15 +965,16 @@ function parser:nextobject()
 
         if t == "number" or t == "boolean" or t == "string" or is_literal(token) then
             push(self, { pos, token })
-
         elseif is_keyword(token) then
             local kw_name = token.name
             if kw_name == "[" then
                 start_type(self, pos, "a")
             elseif kw_name == "]" then
-                local ok, err = pcall(function()
+                pcall(function()
                     local epos, objs = end_type(self, "a")
-                    if not epos then error(err) end
+                    if not epos then
+                        error("array context mismatch")
+                    end
                     -- objs are {pos, value} tuples; unwrap values
                     local arr = {}
                     for _, item in ipairs(objs) do
@@ -988,15 +986,14 @@ function parser:nextobject()
                         push(self, { epos, arr })
                     end
                 end)
-                if not ok then
-                    -- Permissive: ignore mismatched brackets
-                end
             elseif kw_name == "<<" then
                 start_type(self, pos, "d")
             elseif kw_name == ">>" then
-                local ok, err = pcall(function()
+                pcall(function()
                     local epos, objs = end_type(self, "d")
-                    if not epos then error(err) end
+                    if not epos then
+                        error("dictionary context mismatch")
+                    end
                     -- objs are {pos, value} tuples; unwrap values
                     local unwrapped = {}
                     for _, item in ipairs(objs) do
@@ -1033,14 +1030,14 @@ function parser:nextobject()
                             local stream_header = self.fp:read(256) or ""
                             local eol_offset = stream_header:find("[\r\n]", 1)
                             if eol_offset then
-                                local after_eol = eol_offset
-                                if stream_header:byte(eol_offset) == 13 then  -- \r
+                                local after_eol
+                                if stream_header:byte(eol_offset) == 13 then -- \r
                                     after_eol = eol_offset + 1
                                     if after_eol <= #stream_header and stream_header:byte(after_eol) == 10 then
-                                        after_eol = after_eol + 1  -- \r\n
+                                        after_eol = after_eol + 1 -- \r\n
                                     end
                                 else
-                                    after_eol = eol_offset + 1  -- \n
+                                    after_eol = eol_offset + 1 -- \n
                                 end
                                 local data_start = peek_pos + after_eol - 1
                                 self.fp:seek("set", data_start)
@@ -1078,9 +1075,6 @@ function parser:nextobject()
                         push(self, { epos, d })
                     end
                 end)
-                if not ok then
-                    -- Permissive: ignore mismatched brackets
-                end
             else
                 -- Other keyword: check for indirect reference (N N R)
                 -- or push onto stack
@@ -1096,11 +1090,17 @@ end
 
 --- Check if a value is a dict (table with string keys, not a ref/stream/etc).
 local function is_dict_obj(x)
-    if type(x) ~= "table" then return false end
-    if x.ref then return false end
+    if type(x) ~= "table" then
+        return false
+    end
+    if x.ref then
+        return false
+    end
     -- Check for string keys
     for k, _ in pairs(x) do
-        if type(k) == "string" then return true end
+        if type(k) == "string" then
+            return true
+        end
     end
     return false
 end
@@ -1117,8 +1117,7 @@ function parser:_do_keyword(pos, token)
         if #stack >= 2 then
             local gen = stack[#stack]
             local objid = stack[#stack - 1]
-            if type(objid) == "table" and type(objid[2]) == "number"
-                and type(gen) == "table" and type(gen[2]) == "number" then
+            if type(objid) == "table" and type(objid[2]) == "number" and type(gen) == "table" and type(gen[2]) == "number" then
                 stack[#stack] = nil
                 stack[#stack] = nil
                 local ref = { pos, { ref = { objid = objid[2], genno = gen[2] } } }
@@ -1139,7 +1138,7 @@ function parser:_do_keyword(pos, token)
         if #stack >= 1 then
             local entry = stack[#stack]
             if type(entry) == "table" and type(entry[2]) == "table" and is_dict_obj(entry[2]) then
-                stack[#stack] = nil  -- pop the dict
+                stack[#stack] = nil -- pop the dict
                 local dic = entry[2]
                 local objlen = 0
                 if dic.Length ~= nil and type(dic.Length) == "number" then
@@ -1156,14 +1155,14 @@ function parser:_do_keyword(pos, token)
                 local header_end = stream_header:find("[\r\n]", 1)
                 if header_end then
                     -- Skip past the line ending
-                    local after_eol = header_end
-                    if stream_header:byte(header_end) == 13 then  -- \r
+                    local after_eol
+                    if stream_header:byte(header_end) == 13 then -- \r
                         after_eol = header_end + 1
                         if after_eol <= #stream_header and stream_header:byte(after_eol) == 10 then
-                            after_eol = after_eol + 1  -- \r\n
+                            after_eol = after_eol + 1 -- \r\n
                         end
                     else
-                        after_eol = header_end + 1  -- \n
+                        after_eol = header_end + 1 -- \n
                     end
                     local data_start = pos + after_eol - 1
                     self.fp:seek("set", data_start)
@@ -1199,7 +1198,7 @@ function parser:_do_keyword(pos, token)
                     end
                 end
                 -- Failed to read stream data; fall through and push keyword
-                push(self, { pos, dic })  -- put dict back
+                push(self, { pos, dic }) -- put dict back
             end
         end
     end
@@ -1224,7 +1223,9 @@ end
 -- Returns just the object, or nil on EOF.
 function parser:nextobject_value()
     local result = self:nextobject()
-    if result == nil then return nil end
+    if result == nil then
+        return nil
+    end
     return result[2]
 end
 

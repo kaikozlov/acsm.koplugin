@@ -12,7 +12,6 @@
 --   before/after to verify heap growth is bounded.
 
 describe("Memory-bounded decryption", function()
-    local ffi = require("ffi")
     local nc, pdfcrypt, rc4, koutil, pdf, epub, writer
 
     setup(function()
@@ -79,8 +78,7 @@ describe("Memory-bounded decryption", function()
             local encrypted = rc4Encrypt(bookKey, objid, 0, plaintext)
 
             offsets[objid] = f:seek()
-            f:write(string.format("%d 0 obj\n<< /Length %d >>\nstream\r\n",
-                objid, #encrypted))
+            f:write(string.format("%d 0 obj\n<< /Length %d >>\nstream\r\n", objid, #encrypted))
             f:write(encrypted)
             f:write("\r\nendstream\nendobj\n")
         end
@@ -97,9 +95,7 @@ describe("Memory-bounded decryption", function()
 
         -- trailer
         f:write("trailer\n")
-        f:write(string.format(
-            "<< /Size %d /Root 1 0 R /Encrypt 4 0 R /ID [<AABB> <CCDD>] >>\n",
-            maxId + 1))
+        f:write(string.format("<< /Size %d /Root 1 0 R /Encrypt 4 0 R /ID [<AABB> <CCDD>] >>\n", maxId + 1))
         f:write("startxref\n")
         f:write(tostring(xrefOffset) .. "\n")
         f:write("%%EOF\n")
@@ -139,23 +135,22 @@ describe("Memory-bounded decryption", function()
 </encryption>]]
 
         -- Build the EPUB (ZIP) with the encrypted entry
-        local writer = Archiver.Writer:new{}
-        assert(writer:open(outputPath, "epub"))
+        local zipWriter = Archiver.Writer:new({})
+        assert(zipWriter:open(outputPath, "epub"))
         local mtime = os.time()
 
-        writer:setZipCompression("store")
-        writer:addFileFromMemory("mimetype", "application/epub+zip", mtime)
+        zipWriter:setZipCompression("store")
+        zipWriter:addFileFromMemory("mimetype", "application/epub+zip", mtime)
 
-        writer:setZipCompression("deflate")
-        writer:addFileFromMemory("META-INF/container.xml",
-            '<?xml version="1.0"?><container/>', mtime)
-        writer:addFileFromMemory("META-INF/encryption.xml", encXml, mtime)
+        zipWriter:setZipCompression("deflate")
+        zipWriter:addFileFromMemory("META-INF/container.xml", '<?xml version="1.0"?><container/>', mtime)
+        zipWriter:addFileFromMemory("META-INF/encryption.xml", encXml, mtime)
 
         -- Store the encrypted entry (store, not deflate — already encrypted)
-        writer:setZipCompression("store")
-        writer:addFileFromMemory("OEBPS/content.xhtml", encrypted, mtime)
+        zipWriter:setZipCompression("store")
+        zipWriter:addFileFromMemory("OEBPS/content.xhtml", encrypted, mtime)
 
-        writer:close()
+        zipWriter:close()
         return outputPath
     end
 
@@ -174,8 +169,8 @@ describe("Memory-bounded decryption", function()
             -- If the code accumulated all objects, heap would grow by ~5MB.
             -- With streaming, peak growth should be ~100-200KB (one object + overhead).
             local numObjects = 50
-            local streamSize = 100 * 1024  -- 100KB per stream
-            local totalPayload = numObjects * streamSize  -- 5MB
+            local streamSize = 100 * 1024 -- 100KB per stream
+            local totalPayload = numObjects * streamSize -- 5MB
 
             local inputPath = buildLargePdf(tmpDir, bookKey, numObjects, streamSize)
             local outputPath = tmpDir .. "/decrypted.pdf"
@@ -197,18 +192,26 @@ describe("Memory-bounded decryption", function()
             -- Allow up to 20% of total payload as headroom for parser structures,
             -- xref tables, and transient allocations.
             local maxAllowedGrowthKB = totalPayload / 1024 * 0.20
-            print(string.format(
-                "  [pdf] %dKB payload → %.0fKB heap growth (%.1f%%) — limit %.0fKB (20%%)",
-                totalPayload / 1024, heapGrowthKB,
-                (heapGrowthKB / (totalPayload / 1024)) * 100, maxAllowedGrowthKB))
-            assert.is_true(heapGrowthKB < maxAllowedGrowthKB,
+            print(
+                string.format(
+                    "  [pdf] %dKB payload → %.0fKB heap growth (%.1f%%) — limit %.0fKB (20%%)",
+                    totalPayload / 1024,
+                    heapGrowthKB,
+                    (heapGrowthKB / (totalPayload / 1024)) * 100,
+                    maxAllowedGrowthKB
+                )
+            )
+            assert.is_true(
+                heapGrowthKB < maxAllowedGrowthKB,
                 string.format(
                     "Heap grew by %.0fKB (%.1f%% of %dKB payload) — should be < %.0fKB (20%%)\n"
-                    .. "This suggests objects are being accumulated in memory instead of streamed.",
+                        .. "This suggests objects are being accumulated in memory instead of streamed.",
                     heapGrowthKB,
                     (heapGrowthKB / (totalPayload / 1024)) * 100,
                     totalPayload / 1024,
-                    maxAllowedGrowthKB))
+                    maxAllowedGrowthKB
+                )
+            )
 
             -- Verify output is valid
             local f = io.open(outputPath, "rb")
@@ -234,7 +237,7 @@ describe("Memory-bounded decryption", function()
 
             -- Single entry of 2MB. If streaming works, heap should grow by
             -- ~64-128KB (CHUNK_SIZE), not 2MB.
-            local entrySize = 2 * 1024 * 1024  -- 2MB
+            local entrySize = 2 * 1024 * 1024 -- 2MB
 
             local inputPath = buildLargeEpub(tmpDir, bookKey, entrySize)
             local outputPath = tmpDir .. "/decrypted.epub"
@@ -254,18 +257,26 @@ describe("Memory-bounded decryption", function()
             -- 2MB = 2048KB. With streaming (64KB chunks), growth should be << 2MB.
             -- Allow up to 25% as headroom for ZIP extraction + repack overhead.
             local maxAllowedGrowthKB = (entrySize / 1024) * 0.25
-            print(string.format(
-                "  [epub] %dKB payload → %.0fKB heap growth (%.1f%%) — limit %.0fKB (25%%)",
-                entrySize / 1024, heapGrowthKB,
-                (heapGrowthKB / (entrySize / 1024)) * 100, maxAllowedGrowthKB))
-            assert.is_true(heapGrowthKB < maxAllowedGrowthKB,
+            print(
+                string.format(
+                    "  [epub] %dKB payload → %.0fKB heap growth (%.1f%%) — limit %.0fKB (25%%)",
+                    entrySize / 1024,
+                    heapGrowthKB,
+                    (heapGrowthKB / (entrySize / 1024)) * 100,
+                    maxAllowedGrowthKB
+                )
+            )
+            assert.is_true(
+                heapGrowthKB < maxAllowedGrowthKB,
                 string.format(
                     "Heap grew by %.0fKB (%.1f%% of %dKB payload) — should be < %.0fKB (25%%)\n"
-                    .. "This suggests the full entry is being loaded into memory.",
+                        .. "This suggests the full entry is being loaded into memory.",
                     heapGrowthKB,
                     (heapGrowthKB / (entrySize / 1024)) * 100,
                     entrySize / 1024,
-                    maxAllowedGrowthKB))
+                    maxAllowedGrowthKB
+                )
+            )
 
             -- Verify output is valid EPUB
             local f = io.open(outputPath, "rb")
@@ -314,14 +325,14 @@ describe("Memory-bounded decryption", function()
             -- If writer accumulated objects, heap would grow by ~1MB between
             -- mid and end measurements. With streaming, it should be flat.
             local growthKB = heapEnd - heapMid
-            print(string.format(
-                "  [writer] 1MB per batch → %.0fKB growth between batches — limit 200KB",
-                growthKB))
-            assert.is_true(growthKB < 200,
+            print(string.format("  [writer] 1MB per batch → %.0fKB growth between batches — limit 200KB", growthKB))
+            assert.is_true(
+                growthKB < 200,
                 string.format(
-                    "PdfWriter heap grew by %.0fKB between batches — should be < 200KB.\n"
-                    .. "This suggests writer is accumulating object references.",
-                    growthKB))
+                    "PdfWriter heap grew by %.0fKB between batches — should be < 200KB.\n" .. "This suggests writer is accumulating object references.",
+                    growthKB
+                )
+            )
 
             w:finish({ Root = { ref = { objid = 1, genno = 0 } } })
 

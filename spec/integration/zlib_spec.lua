@@ -17,13 +17,13 @@ describe("zlib inflate", function()
         ffi = require("ffi")
 
         -- Add deflate FFI defs (inflate defs already loaded by zlib.lua)
-        ffi.cdef [[
+        ffi.cdef([[
             int deflateInit2_(z_stream *strm, int level, int method,
                               int windowBits, int memLevel, int strategy,
                               const char *version, int stream_size);
             int deflate(z_stream *strm, int flush);
             int deflateEnd(z_stream *strm);
-        ]]
+        ]])
 
         zlib = require("adobe.util.zlib")
 
@@ -41,11 +41,14 @@ describe("zlib inflate", function()
     local function zlibDeflate(data)
         local stream = ffi.new("z_stream[1]")
         local rc = libz.deflateInit2_(
-            stream, Z_DEFAULT_COMPRESSION, 8,  -- method = DEFLATED
-            15,                                 -- windowBits = 15 (zlib-wrapped)
-            8,                                  -- memLevel
-            0,                                  -- strategy = default
-            libz.zlibVersion(), ffi.sizeof(stream[0])
+            stream,
+            Z_DEFAULT_COMPRESSION,
+            8, -- method = DEFLATED
+            15, -- windowBits = 15 (zlib-wrapped)
+            8, -- memLevel
+            0, -- strategy = default
+            libz.zlibVersion(),
+            ffi.sizeof(stream[0])
         )
         if rc ~= Z_OK then
             return nil, "deflateInit2 failed: " .. rc
@@ -73,11 +76,14 @@ describe("zlib inflate", function()
     local function rawDeflate(data)
         local stream = ffi.new("z_stream[1]")
         local rc = libz.deflateInit2_(
-            stream, Z_DEFAULT_COMPRESSION, 8,  -- method = DEFLATED
-            -15,                                 -- windowBits = -15 (raw, no header)
-            8,                                   -- memLevel
-            0,                                   -- strategy = default
-            libz.zlibVersion(), ffi.sizeof(stream[0])
+            stream,
+            Z_DEFAULT_COMPRESSION,
+            8, -- method = DEFLATED
+            -15, -- windowBits = -15 (raw, no header)
+            8, -- memLevel
+            0, -- strategy = default
+            libz.zlibVersion(),
+            ffi.sizeof(stream[0])
         )
         if rc ~= Z_OK then
             return nil, "deflateInit2 failed: " .. rc
@@ -192,7 +198,9 @@ describe("zlib inflate", function()
             local compressed = assert(rawDeflate(data))
 
             local inflater = assert(zlib.rawInflater())
-            local sink = function() return true end
+            local sink = function()
+                return true
+            end
             assert(inflater:update(compressed, #compressed, sink))
             inflater:finalize()
 
@@ -305,7 +313,9 @@ describe("zlib inflate", function()
             local compressed = assert(zlibDeflate(data))
 
             local inflater = assert(zlib.inflater())
-            local sink = function() return true end
+            local sink = function()
+                return true
+            end
             assert(inflater:update(compressed, #compressed, sink))
             inflater:finalize()
 
@@ -321,7 +331,9 @@ describe("zlib inflate", function()
             local rawCompressed = assert(rawDeflate(data))
 
             local inflater = assert(zlib.inflater())
-            local sink = function() return true end
+            local sink = function()
+                return true
+            end
             local ok, err = inflater:update(rawCompressed, #rawCompressed, sink)
             assert.is_nil(ok)
             assert.is.truthy(err)
@@ -330,7 +342,9 @@ describe("zlib inflate", function()
 
         it("errors on invalid compressed data", function()
             local inflater = assert(zlib.inflater())
-            local sink = function() return true end
+            local sink = function()
+                return true
+            end
             local ok, err = inflater:update("not-valid-zlib-data", 19, sink)
             assert.is_nil(ok)
             assert.is.truthy(err)

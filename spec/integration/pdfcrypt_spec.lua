@@ -9,7 +9,7 @@ local pdfcrypt = require("adobe.pdf.pdfcrypt")
 local function hex2bin(hex)
     local parts = {}
     for i = 1, #hex, 2 do
-        parts[#parts + 1] = string.char(tonumber(hex:sub(i, i+1), 16))
+        parts[#parts + 1] = string.char(tonumber(hex:sub(i, i + 1), 16))
     end
     return table.concat(parts)
 end
@@ -21,7 +21,6 @@ local BOOKKEY_MIXED16 = hex2bin("112233445566778899aabbccddeeff00")
 local BOOKKEY_5BYTES = hex2bin("0102030405")
 
 describe("PDF key derivation", function()
-
     describe("genkey_v2", function()
         it("should match Python for \\xaa*16, objid=1, genno=0", function()
             local key = pdfcrypt.genkey_v2(BOOKKEY_AA16, 1, 0)
@@ -161,7 +160,6 @@ describe("PDF key derivation", function()
         -- then AES-CBC encrypt plaintext so removeHardening can decrypt it.
         -- This is a TRUE round-trip test — no nil-tolerance hacks.
         local function encrypt_for_removeHardening(keyType, plaintext, res, dev, ful)
-            local ffi = require("ffi")
             local sha2 = require("ffi/sha2")
 
             -- Derive KEK (same as removeHardening)
@@ -174,7 +172,7 @@ describe("PDF key derivation", function()
                 str = str:gsub("-", "")
                 local bytes = {}
                 for i = 1, 32, 2 do
-                    bytes[#bytes + 1] = string.char(tonumber(str:sub(i, i+1), 16))
+                    bytes[#bytes + 1] = string.char(tonumber(str:sub(i, i + 1), 16))
                 end
                 return table.concat(bytes)
             end
@@ -183,14 +181,15 @@ describe("PDF key derivation", function()
             local fBytes = uuidToBytes(ful)
             local ivParts = {}
             for i = 1, 16 do
-                ivParts[i] = string.char(
-                    bit.bxor(rBytes:byte(i), bit.bxor(dBytes:byte(i), fBytes:byte(i))))
+                ivParts[i] = string.char(bit.bxor(rBytes:byte(i), bit.bxor(dBytes:byte(i), fBytes:byte(i))))
             end
             local iv = table.concat(ivParts)
 
             -- PKCS7-pad the plaintext
             local padLen = 16 - (#plaintext % 16)
-            if padLen == 0 then padLen = 16 end
+            if padLen == 0 then
+                padLen = 16
+            end
             local padded = plaintext .. string.rep(string.char(padLen), padLen)
 
             -- AES-CBC encrypt (no_padding=true = we provide pre-padded data)
@@ -201,12 +200,9 @@ describe("PDF key derivation", function()
         it("should round-trip: encrypt then decrypt for keyType=3", function()
             local plaintext = "Hello, World! DRM"
             local keyType = "3"
-            local ciphertext = encrypt_for_removeHardening(
-                keyType, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
+            local ciphertext = encrypt_for_removeHardening(keyType, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
 
-            local result = pdfcrypt.removeHardening(
-                ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID,
-                nativecrypto.aes_cbc_decrypt)
+            local result = pdfcrypt.removeHardening(ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
             assert.is_truthy(result, "removeHardening returned nil")
             assert.equals("string", type(result))
             assert.equals(plaintext, result)
@@ -215,12 +211,9 @@ describe("PDF key derivation", function()
         it("should round-trip for keyType=10", function()
             local plaintext = "Different key type test!"
             local keyType = "10"
-            local ciphertext = encrypt_for_removeHardening(
-                keyType, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
+            local ciphertext = encrypt_for_removeHardening(keyType, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
 
-            local result = pdfcrypt.removeHardening(
-                ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID,
-                nativecrypto.aes_cbc_decrypt)
+            local result = pdfcrypt.removeHardening(ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
             assert.is_truthy(result, "removeHardening returned nil")
             assert.equals(plaintext, result)
         end)
@@ -231,25 +224,19 @@ describe("PDF key derivation", function()
             local altRes = "00000000-0000-0000-0000-000000000004"
 
             -- Encrypt with RES_UUID (the "correct" UUID)
-            local ciphertext = encrypt_for_removeHardening(
-                keyType, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
+            local ciphertext = encrypt_for_removeHardening(keyType, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
 
             -- Decrypt with the CORRECT UUIDs (should work)
-            local correct = pdfcrypt.removeHardening(
-                ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID,
-                nativecrypto.aes_cbc_decrypt)
+            local correct = pdfcrypt.removeHardening(ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
             assert.is_truthy(correct)
             assert.equals(plaintext, correct)
 
             -- Decrypt with a DIFFERENT resource UUID (IV mismatch → garbage/corruption)
-            local wrong = pdfcrypt.removeHardening(
-                ciphertext, keyType, altRes, DEV_UUID, FUL_UUID,
-                nativecrypto.aes_cbc_decrypt)
+            local wrong = pdfcrypt.removeHardening(ciphertext, keyType, altRes, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
             -- With mismatched IV, the first block decrypts wrong but CBC recovers
             -- remaining blocks. The result will differ from the original.
             assert.is_truthy(wrong, "Different UUID shouldn't crash, just produce wrong output")
-            assert.not_equals(plaintext, wrong,
-                "Different resource UUID should produce different decryption output")
+            assert.not_equals(plaintext, wrong, "Different resource UUID should produce different decryption output")
         end)
 
         it("should produce different results for different keyTypes", function()
@@ -257,16 +244,12 @@ describe("PDF key derivation", function()
             local keyType3 = "3"
             local keyType7 = "7"
 
-            local ct3 = encrypt_for_removeHardening(
-                keyType3, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
-            local ct7 = encrypt_for_removeHardening(
-                keyType7, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
+            local ct3 = encrypt_for_removeHardening(keyType3, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
+            local ct7 = encrypt_for_removeHardening(keyType7, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
 
             -- Decrypt each with its matching keyType
-            local r3 = pdfcrypt.removeHardening(
-                ct3, keyType3, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
-            local r7 = pdfcrypt.removeHardening(
-                ct7, keyType7, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
+            local r3 = pdfcrypt.removeHardening(ct3, keyType3, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
+            local r7 = pdfcrypt.removeHardening(ct7, keyType7, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
 
             -- Both should recover the same plaintext with their matching keyTypes
             assert.is_truthy(r3)
@@ -276,31 +259,23 @@ describe("PDF key derivation", function()
 
             -- But cross-decrypting (keyType3's ciphertext with keyType7's key)
             -- should produce WRONG output (different KEK)
-            local cross = pdfcrypt.removeHardening(
-                ct3, keyType7, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
+            local cross = pdfcrypt.removeHardening(ct3, keyType7, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
             -- Cross-decrypt may return nil (bad padding) or wrong plaintext
             -- Either way, it should NOT equal the original
             if cross then
-                assert.not_equals(plaintext, cross,
-                    "Cross-keyType decryption should not produce correct plaintext")
+                assert.not_equals(plaintext, cross, "Cross-keyType decryption should not produce correct plaintext")
             end
         end)
 
         it("should be deterministic (same inputs -> same output)", function()
             local plaintext = "Determinism test string!!!!"
             local keyType = "5"
-            local ciphertext = encrypt_for_removeHardening(
-                keyType, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
+            local ciphertext = encrypt_for_removeHardening(keyType, plaintext, RES_UUID, DEV_UUID, FUL_UUID)
 
-            local r1 = pdfcrypt.removeHardening(
-                ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID,
-                nativecrypto.aes_cbc_decrypt)
-            local r2 = pdfcrypt.removeHardening(
-                ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID,
-                nativecrypto.aes_cbc_decrypt)
+            local r1 = pdfcrypt.removeHardening(ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
+            local r2 = pdfcrypt.removeHardening(ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
             assert.equals(plaintext, r1)
             assert.equals(r1, r2)
         end)
     end)
-
 end)

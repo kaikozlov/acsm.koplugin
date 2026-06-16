@@ -25,14 +25,14 @@ local fulfillment = require("adobe.fulfillment")
 local naming = require("adobe.util.naming")
 local xml = require("adobe.util.xml")
 
-local ACSM = WidgetContainer:extend{
+local ACSM = WidgetContainer:extend({
     name = "acsm",
     fullname = _("ACSM"),
     is_doc_only = false,
     settings_file = DataStorage:getSettingsDir() .. "/acsm.lua",
     settings = nil,
     reuse_existing = true,
-}
+})
 
 local function trimError(err)
     if type(err) ~= "string" then
@@ -45,9 +45,7 @@ local function isActivationError(err)
     if type(err) ~= "string" then
         return false
     end
-    return err:find("E_ADEPT_USER_AUTH", 1, true)
-        or err:find("E_ADEPT_DISTRIBUTOR_AUTH", 1, true)
-        or err:find("E_ADEPT", 1, true)
+    return err:find("E_ADEPT_USER_AUTH", 1, true) or err:find("E_ADEPT_DISTRIBUTOR_AUTH", 1, true) or err:find("E_ADEPT", 1, true)
 end
 
 function ACSM:init()
@@ -128,16 +126,16 @@ function ACSM:getSubMenuItems()
                 return self.activation_blob ~= nil
             end,
             callback = function()
-                UIManager:show(ConfirmBox:new{
+                UIManager:show(ConfirmBox:new({
                     text = _("Forget the saved Adobe activation?"),
                     ok_text = _("Forget"),
                     ok_callback = function()
                         self:clearActivation()
-                        UIManager:show(Notification:new{
+                        UIManager:show(Notification:new({
                             text = _("Saved Adobe activation cleared."),
-                        })
+                        }))
                     end,
-                })
+                }))
             end,
         },
     }
@@ -169,18 +167,26 @@ end
 -- @treturn table{ title, resourceId, identifier } or nil on failure
 function ACSM:parseAcsmMetadata(acsm_path)
     local content = io.open(acsm_path, "rb")
-    if not content then return nil end
+    if not content then
+        return nil
+    end
     local acsm_data = content:read("*a")
     content:close()
 
     local ok, parsed = pcall(xml.deserialize, acsm_data)
-    if not ok or not parsed then return nil end
+    if not ok or not parsed then
+        return nil
+    end
 
     local token = parsed.fulfillmentToken
-    if not token then return nil end
+    if not token then
+        return nil
+    end
 
     local rii = token.resourceItemInfo
-    if not rii then return nil end
+    if not rii then
+        return nil
+    end
 
     local resource = rii.resource
     local meta = rii.metadata
@@ -218,13 +224,17 @@ end
 -- Falls back to the ACSM filename with appropriate extension.
 function ACSM:deriveOutputPath(acsm_path, acsm_meta)
     local dir = util.splitFilePathName(acsm_path)
-    if dir == "" then dir = "./" end
+    if dir == "" then
+        dir = "./"
+    end
 
     -- Determine extension from format metadata
-    local ext = ".epub"  -- default
+    local ext = ".epub" -- default
     if acsm_meta and acsm_meta.format then
         local fmt = acsm_meta.format
-        if type(fmt) == "table" then fmt = fmt[1] end
+        if type(fmt) == "table" then
+            fmt = fmt[1]
+        end
         if fmt == "application/pdf" then
             ext = ".pdf"
         end
@@ -265,7 +275,9 @@ function ACSM:findUniquePath(path)
     -- Path exists; try numbered variants atomically
     local dir, filename = util.splitFilePathName(path)
     local name, ext = util.splitFileNameSuffix(filename)
-    if ext ~= "" then ext = "." .. ext end
+    if ext ~= "" then
+        ext = "." .. ext
+    end
 
     for i = 1, 999 do
         local candidate = dir .. name .. " (" .. i .. ")" .. ext
@@ -396,13 +408,7 @@ function ACSM:createActivation()
     }
 
     logger.info("[ACSM] createActivation: serializing and saving activation...")
-    self.activation_blob = adobe.serializeActivation(
-        creds,
-        device_uuid,
-        fingerprint,
-        auth_info.certificate,
-        creds.activationURL
-    )
+    self.activation_blob = adobe.serializeActivation(creds, device_uuid, fingerprint, auth_info.certificate, creds.activationURL)
     self:saveSettings()
     logger.info("[ACSM] createActivation: complete")
 
@@ -445,28 +451,14 @@ function ACSM:fulfillLoan(acsm_path, acsm_meta)
 
     Trapper:info(_("Downloading book..."), false, true)
     logger.info("[ACSM] fulfillLoan: starting fulfillment.process...")
-    local result, err = fulfillment.process(
-        acsm_path,
-        output_path,
-        activation.creds,
-        activation.deviceUUID,
-        activation.fingerprint,
-        activation.authCert
-    )
+    local result, err = fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
 
     if not result and reused and isActivationError(err) then
         logger.warn("[ACSM] Saved activation failed, retrying with a new activation:", err)
         self:clearActivation()
         activation = self:createActivation()
         Trapper:info(_("Retrying with new activation..."), false, true)
-        result, err = fulfillment.process(
-            acsm_path,
-            output_path,
-            activation.creds,
-            activation.deviceUUID,
-            activation.fingerprint,
-            activation.authCert
-        )
+        result, err = fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
     end
 
     if not result then
@@ -501,7 +493,9 @@ function ACSM:openFile(file)
         end
     end
 
-    if NetworkMgr:willRerunWhenOnline(function() self:openFile(file) end) then
+    if NetworkMgr:willRerunWhenOnline(function()
+        self:openFile(file)
+    end) then
         return
     end
 
@@ -511,9 +505,9 @@ function ACSM:openFile(file)
         if not result then
             logger.warn("[ACSM] Processing failed:", fulfill_err)
             Trapper:reset()
-            UIManager:show(InfoMessage:new{
+            UIManager:show(InfoMessage:new({
                 text = T(_("ACSM processing failed:\n%1"), trimError(fulfill_err)),
-            })
+            }))
             return
         end
 
@@ -528,9 +522,9 @@ function ACSM:openFile(file)
                 self:openGeneratedBook(result.outputPath)
             end)
         else
-            UIManager:show(InfoMessage:new{
+            UIManager:show(InfoMessage:new({
                 text = T(_("Book downloaded:\n%1"), result.outputPath),
-            })
+            }))
         end
     end)
 end

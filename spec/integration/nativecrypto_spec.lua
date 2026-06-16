@@ -17,7 +17,9 @@ describe("nativecrypto edge cases", function()
         end
 
         -- X509 creation helpers (for encrypt_with_cert tests)
-        pcall(ffi.cdef, [[
+        pcall(
+            ffi.cdef,
+            [[
             typedef struct X509_name_st X509_NAME;
             X509 *X509_new(void);
             int X509_set_version(void *x, long version);
@@ -35,7 +37,8 @@ describe("nativecrypto edge cases", function()
                 const unsigned char *bytes, int len, int loc, int set);
             int X509_set_subject_name(void *x, X509_NAME *name);
             int X509_set_issuer_name(void *x, X509_NAME *name);
-        ]])
+        ]]
+        )
     end)
 
     --- Helper: create a minimal self-signed X509 cert and export as DER.
@@ -46,16 +49,14 @@ describe("nativecrypto edge cases", function()
         ffi.gc(cert, libcrypto.X509_free)
 
         assert(libcrypto.X509_set_version(cert, 2) == 1, "set_version failed")
-        assert(libcrypto.ASN1_INTEGER_set(
-            libcrypto.X509_get0_serialNumber(cert), 1) == 1, "set_serial failed")
+        assert(libcrypto.ASN1_INTEGER_set(libcrypto.X509_get0_serialNumber(cert), 1) == 1, "set_serial failed")
 
         local name = libcrypto.X509_NAME_new()
         assert(name ~= nil, "X509_NAME_new failed")
         ffi.gc(name, libcrypto.X509_NAME_free)
         -- NID_commonName = 13, MBSTRING_ASC = 0x1001
         local cn = "test"
-        assert(libcrypto.X509_NAME_add_entry_by_NID(
-            name, 13, 0x1001, cn, #cn, -1, 0) == 1, "add_entry failed")
+        assert(libcrypto.X509_NAME_add_entry_by_NID(name, 13, 0x1001, cn, #cn, -1, 0) == 1, "add_entry failed")
         assert(libcrypto.X509_set_subject_name(cert, name) == 1, "set_subject failed")
         assert(libcrypto.X509_set_issuer_name(cert, name) == 1, "set_issuer failed")
 
@@ -94,13 +95,17 @@ describe("nativecrypto edge cases", function()
         it("produces correct hash for 'abc'", function()
             local hash = assert(nc.sha1("abc"))
             local hex = ""
-            for i = 1, #hash do hex = hex .. string.format("%02x", hash:byte(i)) end
+            for i = 1, #hash do
+                hex = hex .. string.format("%02x", hash:byte(i))
+            end
             assert.are.equal("a9993e364706816aba3e25717850c26c9cd0d89d", hex)
         end)
         it("produces correct hash for empty string", function()
             local hash = assert(nc.sha1(""))
             local hex = ""
-            for i = 1, #hash do hex = hex .. string.format("%02x", hash:byte(i)) end
+            for i = 1, #hash do
+                hex = hex .. string.format("%02x", hash:byte(i))
+            end
             assert.are.equal("da39a3ee5e6b4b0d3255bfef95601890afd80709", hex)
         end)
     end)
@@ -201,19 +206,22 @@ describe("nativecrypto edge cases", function()
             assert.are_not.equal(e1, e2)
         end)
         it("streaming decryptor handles multiple chunks", function()
-            local ffi = require("ffi")
             local key, iv = string.rep("\x04", 16), string.rep("\x00", 16)
             local pt = string.rep("X", 256)
             local enc = assert(nc.aes_cbc_encrypt(key, iv, pt, true))
             local dec = assert(nc.aes_cbc_decryptor(key, iv, true))
             local parts = {}
             for i = 1, #enc, 48 do
-                dec:update(enc:sub(i, math.min(i+47, #enc)), function(ptr, len)
-                    parts[#parts+1] = ffi.string(ptr, len); return true
+                dec:update(enc:sub(i, math.min(i + 47, #enc)), function(ptr, len)
+                    parts[#parts + 1] = ffi.string(ptr, len)
+                    return true
                 end)
             end
             dec:finalize(function(ptr, len)
-                if len > 0 then parts[#parts+1] = ffi.string(ptr, len) end; return true
+                if len > 0 then
+                    parts[#parts + 1] = ffi.string(ptr, len)
+                end
+                return true
             end)
             assert.are.equal(pt, table.concat(parts))
         end)

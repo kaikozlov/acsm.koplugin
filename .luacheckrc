@@ -15,6 +15,16 @@ globals = {
     "G_defaults",
     "table.pack",
     "table.unpack",
+    -- Android library resolver helpers intentionally exposed for tests.
+    "_nativecrypto_systemLibDir",
+    "_nativecrypto_androidCopyLoad",
+    "_zlib_systemLibDir",
+    -- KOReader headless test helper globals.
+    "disable_plugins",
+    "fastforward_ui_events",
+    "load_plugin",
+    "TEST_DATA_DIR",
+    "lfs",
 }
 
 read_globals = {

@@ -39,9 +39,9 @@ describe("ASN.1 encoding (asn1.element)", function()
             local result = asn1.attribute("method", "bar")
             -- ATTRIBUTE byte + tag("method") + string("bar")
             local expected = "\x05"
-                .. "\x00\x00"          -- namespace "" for attribute name
-                .. "\x00\x06method"    -- attribute local name
-                .. "\x00\x03bar"       -- attribute value
+                .. "\x00\x00" -- namespace "" for attribute name
+                .. "\x00\x06method" -- attribute local name
+                .. "\x00\x03bar" -- attribute value
             assert.are.equal(expected, result)
         end)
     end)
@@ -50,13 +50,13 @@ describe("ASN.1 encoding (asn1.element)", function()
         it("encodes a simple text element", function()
             local result = asn1.element("root", "hello")
             -- BEGIN_ELEMENT + tag("root") + END_ATTRIBUTES + TEXT_NODE + string("hello") + END_ELEMENT
-            local expected = "\x01"            -- BEGIN_ELEMENT
-                .. "\x00\x00"                   -- namespace ""
-                .. "\x00\x04root"              -- tag "root"
-                .. "\x02"                       -- END_ATTRIBUTES
-                .. "\x04"                       -- TEXT_NODE
-                .. "\x00\x05hello"             -- text content
-                .. "\x03"                       -- END_ELEMENT
+            local expected = "\x01" -- BEGIN_ELEMENT
+                .. "\x00\x00" -- namespace ""
+                .. "\x00\x04root" -- tag "root"
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x04" -- TEXT_NODE
+                .. "\x00\x05hello" -- text content
+                .. "\x03" -- END_ELEMENT
             assert.are.equal(expected, result)
         end)
 
@@ -65,15 +65,15 @@ describe("ASN.1 encoding (asn1.element)", function()
             local result = asn1.element("root", {
                 _attr = { method = "bar" },
             })
-            local expected = "\x01"            -- BEGIN_ELEMENT
-                .. "\x00\x00"                   -- namespace ""
-                .. "\x00\x04root"              -- tag "root"
-                .. "\x05"                       -- ATTRIBUTE
-                .. "\x00\x00"                   -- attr namespace ""
-                .. "\x00\x06method"            -- attr name "method"
-                .. "\x00\x03bar"               -- attr value "bar"
-                .. "\x02"                       -- END_ATTRIBUTES
-                .. "\x03"                       -- END_ELEMENT (empty body)
+            local expected = "\x01" -- BEGIN_ELEMENT
+                .. "\x00\x00" -- namespace ""
+                .. "\x00\x04root" -- tag "root"
+                .. "\x05" -- ATTRIBUTE
+                .. "\x00\x00" -- attr namespace ""
+                .. "\x00\x06method" -- attr name "method"
+                .. "\x00\x03bar" -- attr value "bar"
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x03" -- END_ELEMENT (empty body)
             assert.are.equal(expected, result)
         end)
 
@@ -81,15 +81,15 @@ describe("ASN.1 encoding (asn1.element)", function()
             local result = asn1.element("adept:signIn", {
                 _attr = { method = "bar" },
             })
-            local expected = "\x01"            -- BEGIN_ELEMENT
-                .. "\x00\x05adept"             -- namespace "adept" (5)
-                .. "\x00\x06signIn"            -- tag "signIn" (6)
-                .. "\x05"                       -- ATTRIBUTE
-                .. "\x00\x00"                   -- attr namespace ""
-                .. "\x00\x06method"            -- attr name "method"
-                .. "\x00\x03bar"               -- attr value "bar"
-                .. "\x02"                       -- END_ATTRIBUTES
-                .. "\x03"                       -- END_ELEMENT
+            local expected = "\x01" -- BEGIN_ELEMENT
+                .. "\x00\x05adept" -- namespace "adept" (5)
+                .. "\x00\x06signIn" -- tag "signIn" (6)
+                .. "\x05" -- ATTRIBUTE
+                .. "\x00\x00" -- attr namespace ""
+                .. "\x00\x06method" -- attr name "method"
+                .. "\x00\x03bar" -- attr value "bar"
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x03" -- END_ELEMENT
             assert.are.equal(expected, result)
         end)
 
@@ -97,18 +97,18 @@ describe("ASN.1 encoding (asn1.element)", function()
             local result = asn1.element("root", {
                 child = "text",
             })
-            local expected = "\x01"            -- BEGIN_ELEMENT root
-                .. "\x00\x00"                   -- namespace ""
-                .. "\x00\x04root"              -- tag "root"
-                .. "\x02"                       -- END_ATTRIBUTES
-                .. "\x01"                       -- BEGIN_ELEMENT child
-                .. "\x00\x00"                   -- namespace ""
-                .. "\x00\x05child"             -- tag "child"
-                .. "\x02"                       -- END_ATTRIBUTES
-                .. "\x04"                       -- TEXT_NODE
-                .. "\x00\x04text"              -- text "text"
-                .. "\x03"                       -- END_ELEMENT child
-                .. "\x03"                       -- END_ELEMENT root
+            local expected = "\x01" -- BEGIN_ELEMENT root
+                .. "\x00\x00" -- namespace ""
+                .. "\x00\x04root" -- tag "root"
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x01" -- BEGIN_ELEMENT child
+                .. "\x00\x00" -- namespace ""
+                .. "\x00\x05child" -- tag "child"
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x04" -- TEXT_NODE
+                .. "\x00\x04text" -- text "text"
+                .. "\x03" -- END_ELEMENT child
+                .. "\x03" -- END_ELEMENT root
             assert.are.equal(expected, result)
         end)
 
@@ -118,16 +118,16 @@ describe("ASN.1 encoding (asn1.element)", function()
                 alpha = "a",
             })
             -- orderedPairs sorts keys alphabetically: alpha, beta
-            local expected = "\x01"            -- BEGIN_ELEMENT root
+            local expected = "\x01" -- BEGIN_ELEMENT root
                 .. "\x00\x00\x00\x04root"
-                .. "\x02"                       -- END_ATTRIBUTES
-                .. "\x01"                       -- BEGIN_ELEMENT alpha
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x01" -- BEGIN_ELEMENT alpha
                 .. "\x00\x00\x00\x05alpha"
-                .. "\x02\x04\x00\x01a\x03"    -- TEXT "a" + END
-                .. "\x01"                       -- BEGIN_ELEMENT beta
+                .. "\x02\x04\x00\x01a\x03" -- TEXT "a" + END
+                .. "\x01" -- BEGIN_ELEMENT beta
                 .. "\x00\x00\x00\x04beta"
-                .. "\x02\x04\x00\x01b\x03"    -- TEXT "b" + END
-                .. "\x03"                       -- END_ELEMENT root
+                .. "\x02\x04\x00\x01b\x03" -- TEXT "b" + END
+                .. "\x03" -- END_ELEMENT root
             assert.are.equal(expected, result)
         end)
 
@@ -136,15 +136,15 @@ describe("ASN.1 encoding (asn1.element)", function()
                 _attr = { ["xmlns:foo"] = "http://example.com", bar = "baz" },
             })
             -- Only "bar" attribute should appear (xmlns:foo is skipped)
-            local expected = "\x01"            -- BEGIN_ELEMENT
-                .. "\x00\x00"                   -- namespace ""
-                .. "\x00\x04root"              -- tag "root"
-                .. "\x05"                       -- ATTRIBUTE
-                .. "\x00\x00"                   -- attr namespace ""
-                .. "\x00\x03bar"               -- attr name "bar"
-                .. "\x00\x03baz"               -- attr value "baz"
-                .. "\x02"                       -- END_ATTRIBUTES
-                .. "\x03"                       -- END_ELEMENT
+            local expected = "\x01" -- BEGIN_ELEMENT
+                .. "\x00\x00" -- namespace ""
+                .. "\x00\x04root" -- tag "root"
+                .. "\x05" -- ATTRIBUTE
+                .. "\x00\x00" -- attr namespace ""
+                .. "\x00\x03bar" -- attr name "bar"
+                .. "\x00\x03baz" -- attr value "baz"
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x03" -- END_ELEMENT
             assert.are.equal(expected, result)
         end)
 
@@ -156,14 +156,15 @@ describe("ASN.1 encoding (asn1.element)", function()
             -- tag splits on last colon: ns="http://ns.adobe.com/adept" name="activate"
             local ADEPT = "http://ns.adobe.com/adept"
             local expected = "\x01"
-                .. "\x00\x19" .. ADEPT              -- namespace (length 25)
-                .. "\x00\x08activate"                 -- tag (length 8)
-                .. "\x05"                                   -- ATTRIBUTE
-                .. "\x00\x00"                               -- attr namespace ""
-                .. "\x00\x0BrequestType"                   -- attr name (length 11)
-                .. "\x00\x07initial"                        -- attr value (length 7)
-                .. "\x02"                                   -- END_ATTRIBUTES
-                .. "\x03"                                   -- END_ELEMENT
+                .. "\x00\x19"
+                .. ADEPT -- namespace (length 25)
+                .. "\x00\x08activate" -- tag (length 8)
+                .. "\x05" -- ATTRIBUTE
+                .. "\x00\x00" -- attr namespace ""
+                .. "\x00\x0BrequestType" -- attr name (length 11)
+                .. "\x00\x07initial" -- attr value (length 7)
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x03" -- END_ELEMENT
             assert.are.equal(expected, result)
         end)
     end)

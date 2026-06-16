@@ -16,24 +16,13 @@ end
 -- Internal helpers
 ------------------------------------------------------------------------
 
---- Escape a string for PDF literal-string output (parenthesized).
--- Matches ineptpdf.py PDFSerializer.escape_string().
-local function escapeString(s)
-    local r = s:gsub("\\", "\\\\")
-    r = r:gsub("\n", "\\n")
-    r = r:gsub("%(", "\\(")
-    r = r:gsub("%)", "\\)")
-    return r
-end
-
 --- Serialize a PDF name to /Name with #XX hex escaping.
 -- Matches ineptpdf.py PSLiteral.__repr__().
 local function serializeName(name)
     local parts = {}
     for i = 1, #name do
         local c = name:byte(i)
-        if (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or
-           (c >= 48 and c <= 57) then
+        if (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) then
             parts[#parts + 1] = string.char(c)
         else
             parts[#parts + 1] = string.format("#%02x", c)
@@ -62,7 +51,7 @@ PDFSerializer.__index = PDFSerializer
 function PDFSerializer.new(out)
     local self = setmetatable({}, PDFSerializer)
     self.out = out
-    self.last = ""  -- 1-char string tracking last byte written
+    self.last = "" -- 1-char string tracking last byte written
     return self
 end
 
@@ -89,23 +78,23 @@ function PDFSerializer:escape_string(s)
     local parts = {}
     for i = 1, #s do
         local c = s:byte(i)
-        if c == 92 then       -- backslash
+        if c == 92 then -- backslash
             parts[#parts + 1] = "\\\\"
-        elseif c == 40 then   -- (
+        elseif c == 40 then -- (
             parts[#parts + 1] = "\\("
-        elseif c == 41 then   -- )
+        elseif c == 41 then -- )
             parts[#parts + 1] = "\\)"
-        elseif c == 10 then   -- LF
+        elseif c == 10 then -- LF
             parts[#parts + 1] = "\\n"
-        elseif c == 13 then   -- CR
+        elseif c == 13 then -- CR
             parts[#parts + 1] = "\\r"
-        elseif c == 9 then    -- HT
+        elseif c == 9 then -- HT
             parts[#parts + 1] = "\\t"
-        elseif c == 8 then    -- BS
+        elseif c == 8 then -- BS
             parts[#parts + 1] = "\\b"
-        elseif c == 12 then   -- FF
+        elseif c == 12 then -- FF
             parts[#parts + 1] = "\\f"
-        elseif c < 32 then    -- other control
+        elseif c < 32 then -- other control
             parts[#parts + 1] = string.format("\\%03o", c)
         else
             parts[#parts + 1] = string.char(c)
@@ -118,14 +107,18 @@ end
 -- Matches Python's self.last.isalnum().
 local function lastIsAlnum(self)
     local b = self.last
-    if not b or #b == 0 then return false end
+    if not b or #b == 0 then
+        return false
+    end
     local c = b:byte(1)
     return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
 end
 
 --- Check if first byte of a string is alphanumeric.
 local function firstIsAlnum(s)
-    if not s or #s == 0 then return false end
+    if not s or #s == 0 then
+        return false
+    end
     local c = s:byte(1)
     return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
 end
@@ -150,25 +143,45 @@ end
 -- Returns one of: "ref", "stream", "legacy_stream", "literal", "keyword",
 -- "dict", "array", or nil (unknown).
 local function classifyTable(obj)
-    if obj.ref then return "ref" end
-    if obj.dic ~= nil and obj.rawdata ~= nil then return "stream" end
-    if obj.stream_data ~= nil then return "legacy_stream" end
-    if pdfparser and getmetatable(obj) == pdfparser.PSLiteral then return "literal" end
-    if pdfparser and getmetatable(obj) == pdfparser.PSKeyword then return "keyword" end
+    if obj.ref then
+        return "ref"
+    end
+    if obj.dic ~= nil and obj.rawdata ~= nil then
+        return "stream"
+    end
+    if obj.stream_data ~= nil then
+        return "legacy_stream"
+    end
+    if pdfparser and getmetatable(obj) == pdfparser.PSLiteral then
+        return "literal"
+    end
+    if pdfparser and getmetatable(obj) == pdfparser.PSKeyword then
+        return "keyword"
+    end
     -- Fallback name: plain table with ONLY a 'name' field
     if type(obj.name) == "string" then
         local n = 0
-        for _ in pairs(obj) do n = n + 1 end
-        if n == 1 then return "literal" end
+        for _ in pairs(obj) do
+            n = n + 1
+        end
+        if n == 1 then
+            return "literal"
+        end
     end
     -- Fallback keyword: plain table with ONLY a 'keyword' field
     if type(obj.keyword) == "string" then
         local n = 0
-        for _ in pairs(obj) do n = n + 1 end
-        if n == 1 then return "keyword" end
+        for _ in pairs(obj) do
+            n = n + 1
+        end
+        if n == 1 then
+            return "keyword"
+        end
     end
     -- Dict or array
-    if isDict(obj) then return "dict" end
+    if isDict(obj) then
+        return "dict"
+    end
     return "array"
 end
 
@@ -186,7 +199,6 @@ function PDFSerializer:serialize_object(obj)
                 self:write(" ")
             end
             self:write(string.format("%d %d R", obj.ref.objid, obj.ref.genno))
-
         elseif kind == "stream" then
             -- PDFStream
             local data = obj.get_decdata and obj:get_decdata() or obj.rawdata
@@ -198,7 +210,6 @@ function PDFSerializer:serialize_object(obj)
             self:write("stream\n")
             self:write(data)
             self:write("\nendstream")
-
         elseif kind == "legacy_stream" then
             local data = obj.stream_data
             local dict = obj.dict or {}
@@ -207,21 +218,17 @@ function PDFSerializer:serialize_object(obj)
             self:write("stream\n")
             self:write(data)
             self:write("\nendstream")
-
         elseif kind == "literal" then
             -- PSLiteral: write as /Name
             local name = obj.name
             self:write(serializeName(name))
-
         elseif kind == "keyword" then
             -- PSKeyword: write raw
             self:write(obj.keyword or obj.name)
-
         elseif kind == "dict" then
             -- dict: << /Key val /Key val >>
             -- Correct malformed Mac OS resource forks for Stanza
-            if obj.ResFork ~= nil and obj.Type ~= nil
-                    and obj.Subtype == nil and type(obj.Type) == "number" then
+            if obj.ResFork ~= nil and obj.Type ~= nil and obj.Subtype == nil and type(obj.Type) == "number" then
                 obj.Subtype = obj.Type
                 obj.Type = nil
             end
@@ -233,7 +240,6 @@ function PDFSerializer:serialize_object(obj)
                 end
             end
             self:write(">>")
-
         elseif kind == "array" then
             -- list: [ elem elem ... ]
             self:write("[")
@@ -242,7 +248,6 @@ function PDFSerializer:serialize_object(obj)
             end
             self:write("]")
         end
-
     elseif t == "number" then
         -- int or Decimal
         local s = formatNumber(obj)
@@ -250,14 +255,12 @@ function PDFSerializer:serialize_object(obj)
             self:write(" ")
         end
         self:write(s)
-
     elseif t == "boolean" then
         local s = obj and "true" or "false"
         if lastIsAlnum(self) then
             self:write(" ")
         end
         self:write(s)
-
     elseif t == "string" then
         -- bytearray: write as (escaped)
         -- All Lua strings from our decrypted objects are treated as
@@ -265,7 +268,6 @@ function PDFSerializer:serialize_object(obj)
         self:write("(")
         self:write(self:escape_string(obj))
         self:write(")")
-
     else
         -- Fallback: str(obj)
         local s = tostring(obj)
@@ -336,7 +338,9 @@ end
 function PdfWriter:writeObject(objid, obj)
     self._xrefs[objid] = self._ser:tell()
     self._ser:serialize_indirect(objid, obj)
-    if objid > self._maxId then self._maxId = objid end
+    if objid > self._maxId then
+        self._maxId = objid
+    end
     self._count = self._count + 1
 end
 
@@ -392,8 +396,12 @@ end
 function writer.serializeObject(obj)
     local buf = {}
     local ser = PDFSerializer.new({
-        write = function(_, data) buf[#buf + 1] = data end,
-        seek = function() return 0 end,
+        write = function(_, data)
+            buf[#buf + 1] = data
+        end,
+        seek = function()
+            return 0
+        end,
     })
     ser:serialize_object(obj)
     return table.concat(buf)
@@ -410,7 +418,9 @@ end
 -- @param encrypt_objid number|nil object ID to skip
 function writer.writeCleanPdf(inPath, outPath, doc, encrypt_objid)
     local w, err = PdfWriter.new(outPath, { version = doc.version })
-    if not w then error(err) end
+    if not w then
+        error(err)
+    end
 
     -- Collect and sort object IDs
     local objids = {}

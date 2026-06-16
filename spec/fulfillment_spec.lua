@@ -1,5 +1,4 @@
 describe("fulfillment module", function()
-
     describe("downloadBook", function()
         it("should return true instead of file content on success", function()
             -- The downloadBook function now uses lfs.attributes instead of

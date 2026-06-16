@@ -2,8 +2,6 @@
 
 local pdfdoc = require("adobe.pdf.pdfdoc")
 local pdfparser = require("adobe.pdf.parser")
-local lfs = require("libs/libkoreader-lfs")
-
 -- Helper: create a minimal valid PDF in a temp file
 local function createMinimalPdf(extra_objects)
     local tmp = os.tmpname()
@@ -11,9 +9,9 @@ local function createMinimalPdf(extra_objects)
 
     local objects = {}
     -- Object 1: Catalog
-    table.insert(objects, {id = 1, data = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"})
+    table.insert(objects, { id = 1, data = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" })
     -- Object 2: Pages
-    table.insert(objects, {id = 2, data = "2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n"})
+    table.insert(objects, { id = 2, data = "2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n" })
 
     -- Add any extra objects
     if extra_objects then
@@ -34,7 +32,9 @@ local function createMinimalPdf(extra_objects)
     local xref_offset = f:seek()
     local maxid = 0
     for _, obj in ipairs(objects) do
-        if obj.id > maxid then maxid = obj.id end
+        if obj.id > maxid then
+            maxid = obj.id
+        end
     end
 
     f:write("xref\n")
@@ -56,14 +56,15 @@ local function createMinimalPdf(extra_objects)
 end
 
 describe("PDFDocument", function()
-
     teardown(function()
         -- Clean up any temp files if needed
     end)
 
     it("should open a minimal valid PDF", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         local ok, err = doc:open(tmp)
@@ -74,7 +75,9 @@ describe("PDFDocument", function()
 
     it("should read the PDF header", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -85,7 +88,9 @@ describe("PDFDocument", function()
 
     it("should parse the xref table", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -96,7 +101,9 @@ describe("PDFDocument", function()
 
     it("should enumerate all objids", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -105,7 +112,9 @@ describe("PDFDocument", function()
         assert.is_truthy(#ids >= 2, "should have at least 2 objects (catalog + pages)")
         -- Verify specific IDs exist
         local seen = {}
-        for _, id in ipairs(ids) do seen[id] = true end
+        for _, id in ipairs(ids) do
+            seen[id] = true
+        end
         assert.is_truthy(seen[1], "object 1 (catalog) should be in objids")
         assert.is_truthy(seen[2], "object 2 (pages) should be in objids")
         -- Object 0 should NEVER be returned (it's reserved/free)
@@ -115,7 +124,9 @@ describe("PDFDocument", function()
 
     it("should load objects by objid", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -132,7 +143,9 @@ describe("PDFDocument", function()
 
     it("should detect no encryption on a plain PDF", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -144,7 +157,9 @@ describe("PDFDocument", function()
 
     it("should parse trailer and find Root", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -155,9 +170,11 @@ describe("PDFDocument", function()
 
     it("should handle extra objects", function()
         local tmp = createMinimalPdf({
-            {id = 3, data = "3 0 obj\n<< /Title (Hello World) /Author (Test) >>\nendobj\n"},
+            { id = 3, data = "3 0 obj\n<< /Title (Hello World) /Author (Test) >>\nendobj\n" },
         })
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -170,7 +187,9 @@ describe("PDFDocument", function()
 
     it("should produce a clean trailer without Encrypt", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -179,5 +198,4 @@ describe("PDFDocument", function()
         assert.is_falsy(clean.Encrypt, "clean trailer should not have Encrypt")
         doc:close()
     end)
-
 end)

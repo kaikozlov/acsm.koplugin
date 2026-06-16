@@ -100,7 +100,7 @@ describe("main.lua helpers", function()
             local path = tmpDir .. "/newfile.epub"
             local result = ACSM.findUniquePath(ACSM, path)
             assert.are.equal(path, result)
-            os.remove(result)  -- clean up placeholder
+            os.remove(result) -- clean up placeholder
             os.execute("rm -rf " .. tmpDir)
         end)
 

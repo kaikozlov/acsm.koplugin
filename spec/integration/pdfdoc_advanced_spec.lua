@@ -11,13 +11,13 @@ local ffi = require("ffi")
 require("adobe.util.zlib")
 
 -- Add deflate FFI defs (inflate defs already loaded by zlib.lua)
-ffi.cdef [[
+ffi.cdef([[
     int deflateInit2_(z_stream *strm, int level, int method,
                       int windowBits, int memLevel, int strategy,
                       const char *version, int stream_size);
     int deflate(z_stream *strm, int flush);
     int deflateEnd(z_stream *strm);
-]]
+]])
 
 ------------------------------------------------------------------------
 -- Helpers
@@ -27,7 +27,9 @@ local libz
 if ffi.loadlib then
     local ok
     ok, libz = pcall(ffi.loadlib, "z", "1")
-    if not ok then libz = ffi.load("z") end
+    if not ok then
+        libz = ffi.load("z")
+    end
 else
     libz = ffi.load("z")
 end
@@ -37,10 +39,14 @@ end
 local function rawDeflate(data)
     local stream = ffi.new("z_stream[1]")
     local rc = libz.deflateInit2_(
-        stream, -1, 8,  -- Z_DEFAULT_COMPRESSION, method=DEFLATED
-        15,             -- zlib wrapper (matches zlib.inflater())
-        8, 0,           -- memLevel, strategy
-        libz.zlibVersion(), ffi.sizeof(stream[0])
+        stream,
+        -1,
+        8, -- Z_DEFAULT_COMPRESSION, method=DEFLATED
+        15, -- zlib wrapper (matches zlib.inflater())
+        8,
+        0, -- memLevel, strategy
+        libz.zlibVersion(),
+        ffi.sizeof(stream[0])
     )
     assert(rc == 0, "deflateInit2 failed: " .. tostring(rc))
 
@@ -68,9 +74,9 @@ local function createMinimalPdf(extra_objects, opts)
 
     local objects = {}
     -- Object 1: Catalog
-    table.insert(objects, {id = 1, data = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"})
+    table.insert(objects, { id = 1, data = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" })
     -- Object 2: Pages
-    table.insert(objects, {id = 2, data = "2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n"})
+    table.insert(objects, { id = 2, data = "2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n" })
 
     -- Add any extra objects
     if extra_objects then
@@ -91,7 +97,9 @@ local function createMinimalPdf(extra_objects, opts)
     local xref_offset = f:seek()
     local maxid = 0
     for _, obj in ipairs(objects) do
-        if obj.id > maxid then maxid = obj.id end
+        if obj.id > maxid then
+            maxid = obj.id
+        end
     end
 
     f:write("xref\n")
@@ -120,10 +128,10 @@ local function createEncryptedPdf(encrypt_dict_str, encrypt_id)
     local f = io.open(tmp, "wb")
 
     local objects = {}
-    table.insert(objects, {id = 1, data = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"})
-    table.insert(objects, {id = 2, data = "2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n"})
+    table.insert(objects, { id = 1, data = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" })
+    table.insert(objects, { id = 2, data = "2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n" })
     local edata = string.format("%d 0 obj\n%s\nendobj\n", encrypt_id, encrypt_dict_str)
-    table.insert(objects, {id = encrypt_id, data = edata})
+    table.insert(objects, { id = encrypt_id, data = edata })
 
     f:write("%PDF-1.4\n")
     f:write(string.char(0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A))
@@ -145,8 +153,7 @@ local function createEncryptedPdf(encrypt_dict_str, encrypt_id)
     end
 
     f:write("trailer\n")
-    f:write(string.format("<< /Size %d /Root 1 0 R /Encrypt %d 0 R /ID [(abcdefghijklmnop)(abcdefghijklmnop)] >>\n",
-        maxid + 1, encrypt_id))
+    f:write(string.format("<< /Size %d /Root 1 0 R /Encrypt %d 0 R /ID [(abcdefghijklmnop)(abcdefghijklmnop)] >>\n", maxid + 1, encrypt_id))
     f:write("startxref\n")
     f:write(string.format("%d\n", xref_offset))
     f:write("%%EOF\n")
@@ -160,10 +167,9 @@ end
 ------------------------------------------------------------------------
 
 describe("PDFStream", function()
-
     describe("basic construction", function()
         it("creates a stream with dictionary and rawdata", function()
-            local s = pdfdoc.PDFStream:new({Length = 5}, "hello")
+            local s = pdfdoc.PDFStream:new({ Length = 5 }, "hello")
             assert.equals("hello", s.rawdata)
             assert.equals(5, s.dic.Length)
             assert.is_nil(s.data)
@@ -383,8 +389,8 @@ describe("decipher_all", function()
             outer = "retuo",
             nested = {
                 inner = "renni",
-                deep = { value = "eulav" }
-            }
+                deep = { value = "eulav" },
+            },
         }
         local result = pdfdoc.decipher_all(simple_decipher, 1, 0, obj)
         assert.equals("outer", result.outer)
@@ -507,10 +513,10 @@ describe("_unpredict (PNG Up predictor)", function()
         f:write(string.char(0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A))
 
         -- Object 1: Catalog
-        local cat_off = f:seek()
+        f:seek()
         f:write("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
         -- Object 2: Pages
-        local pages_off = f:seek()
+        f:seek()
         f:write("2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
 
         -- XRef stream (object 3)
@@ -535,7 +541,9 @@ describe("_unpredict (PNG Up predictor)", function()
         assert.is_truthy(ok or #doc.xrefs > 0, "should parse xref stream with predictor: " .. tostring(err))
 
         os.remove(tmp)
-        if doc.file then doc:close() end
+        if doc.file then
+            doc:close()
+        end
     end)
 end)
 
@@ -544,7 +552,6 @@ end)
 ------------------------------------------------------------------------
 
 describe("PDFXRefStream", function()
-
     describe("W-array entry parsing", function()
         it("parses entries with W=[1,2,1]", function()
             -- Build raw xref data: 3 objects
@@ -563,7 +570,7 @@ describe("PDFXRefStream", function()
                 dic = {
                     Type = pdfparser.literal("XRef"),
                     Size = 3,
-                    W = {1, 2, 1},
+                    W = { 1, 2, 1 },
                     Length = #compressed,
                     Filter = pdfparser.literal("FlateDecode"),
                 },
@@ -600,7 +607,7 @@ describe("PDFXRefStream", function()
                 dic = {
                     Type = pdfparser.literal("XRef"),
                     Size = 2,
-                    W = {1, 3, 2},
+                    W = { 1, 3, 2 },
                     Length = #compressed,
                     Filter = pdfparser.literal("FlateDecode"),
                 },
@@ -631,7 +638,7 @@ describe("PDFXRefStream", function()
                 dic = {
                     Type = pdfparser.literal("XRef"),
                     Size = 3,
-                    W = {1, 2, 1},
+                    W = { 1, 2, 1 },
                     Length = #compressed,
                     Filter = pdfparser.literal("FlateDecode"),
                 },
@@ -666,8 +673,8 @@ describe("PDFXRefStream", function()
                 dic = {
                     Type = pdfparser.literal("XRef"),
                     Size = 11,
-                    W = {1, 2, 1},
-                    Index = {5, 2, 10, 1},
+                    W = { 1, 2, 1 },
+                    Index = { 5, 2, 10, 1 },
                     Length = #compressed,
                     Filter = pdfparser.literal("FlateDecode"),
                 },
@@ -701,7 +708,7 @@ describe("PDFXRefStream", function()
                 dic = {
                     Type = pdfparser.literal("XRef"),
                     Size = 2,
-                    W = {1, 2, 1},
+                    W = { 1, 2, 1 },
                     -- No Index field
                     Length = #compressed,
                     Filter = pdfparser.literal("FlateDecode"),
@@ -730,8 +737,8 @@ describe("PDFXRefStream", function()
                 dic = {
                     Type = pdfparser.literal("XRef"),
                     Size = 9,
-                    W = {1, 2, 1},
-                    Index = {3, 2, 8, 1},
+                    W = { 1, 2, 1 },
+                    Index = { 3, 2, 8, 1 },
                     Length = #compressed,
                     Filter = pdfparser.literal("FlateDecode"),
                 },
@@ -758,9 +765,11 @@ describe("PDFDocument:getobj() with decryption", function()
     it("decrypts string values in loaded objects when decipher is set", function()
         -- Create a PDF with a dict object containing a string
         local tmp = createMinimalPdf({
-            {id = 3, data = "3 0 obj\n<< /Title (encrypted_value) /Count 7 >>\nendobj\n"},
+            { id = 3, data = "3 0 obj\n<< /Title (encrypted_value) /Count 7 >>\nendobj\n" },
         })
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -784,9 +793,11 @@ describe("PDFDocument:getobj() with decryption", function()
     it("does not decrypt the Encrypt dict object itself", function()
         -- When loading via _loadRawObject (used for Encrypt dict), no decryption happens
         local tmp = createMinimalPdf({
-            {id = 3, data = "3 0 obj\n<< /Filter /EBX_HANDLER /V 4 /ADEPT_LICENSE (license_data) >>\nendobj\n"},
+            { id = 3, data = "3 0 obj\n<< /Filter /EBX_HANDLER /V 4 /ADEPT_LICENSE (license_data) >>\nendobj\n" },
         })
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -819,14 +830,13 @@ describe("PDFDocument:getobj() with decryption", function()
     it("attaches decipher to stream objects", function()
         -- Create a stream object in the PDF
         local stream_data = "stream content here"
-        local stream_obj = string.format(
-            "3 0 obj\n<< /Length %d >>\nstream\r\n%s\r\nendstream\nendobj\n",
-            #stream_data, stream_data
-        )
+        local stream_obj = string.format("3 0 obj\n<< /Length %d >>\nstream\r\n%s\r\nendstream\nendobj\n", #stream_data, stream_data)
         local tmp = createMinimalPdf({
-            {id = 3, data = stream_obj},
+            { id = 3, data = stream_obj },
         })
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -852,9 +862,11 @@ describe("PDFDocument:getobj() with decryption", function()
 
     it("caches objects after first load", function()
         local tmp = createMinimalPdf({
-            {id = 3, data = "3 0 obj\n<< /Value (test) >>\nendobj\n"},
+            { id = 3, data = "3 0 obj\n<< /Value (test) >>\nendobj\n" },
         })
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -876,7 +888,9 @@ describe("PDFDocument:getobj() with decryption", function()
 
     it("returns nil for non-existent object", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -914,10 +928,7 @@ describe("PDFDocument:_expandObjStm()", function()
         local compressed = rawDeflate(stm_content)
 
         -- Build the ObjStm stream object (obj 3)
-        local stm_obj_str = string.format(
-            "3 0 obj\n<< /Type /ObjStm /N 2 /First %d /Length %d /Filter /FlateDecode >>\nstream\r\n",
-            #header, #compressed
-        )
+        local stm_obj_str = string.format("3 0 obj\n<< /Type /ObjStm /N 2 /First %d /Length %d /Filter /FlateDecode >>\nstream\r\n", #header, #compressed)
         stm_obj_str = stm_obj_str .. compressed .. "\r\nendstream\nendobj\n"
 
         -- Build xref that knows obj 4 and 5 are in ObjStm 3
@@ -987,10 +998,7 @@ describe("PDFDocument:_expandObjStm()", function()
         local stm_content = "10 0 42" -- one object: obj 10 = number 42
         local compressed = rawDeflate(stm_content)
 
-        local stm_obj_str = string.format(
-            "3 0 obj\n<< /Type /ObjStm /N 1 /First 5 /Length %d /Filter /FlateDecode >>\nstream\r\n",
-            #compressed
-        )
+        local stm_obj_str = string.format("3 0 obj\n<< /Type /ObjStm /N 1 /First 5 /Length %d /Filter /FlateDecode >>\nstream\r\n", #compressed)
         stm_obj_str = stm_obj_str .. compressed .. "\r\nendstream\nendobj\n"
 
         local tmp = os.tmpname()
@@ -1038,12 +1046,11 @@ end)
 describe("PDFDocument:extractAdeptLicense()", function()
     it("extracts ADEPT_LICENSE string from encryption dict", function()
         local license_xml = "<?xml version='1.0'?><rights><key>value</key></rights>"
-        local encrypt_dict = string.format(
-            "<< /Filter /EBX_HANDLER /V 4 /ADEPT_LICENSE (%s) /EBX_BOOKID (urn:uuid:test-123) >>",
-            license_xml
-        )
+        local encrypt_dict = string.format("<< /Filter /EBX_HANDLER /V 4 /ADEPT_LICENSE (%s) /EBX_BOOKID (urn:uuid:test-123) >>", license_xml)
         local tmp = createEncryptedPdf(encrypt_dict)
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -1059,7 +1066,9 @@ describe("PDFDocument:extractAdeptLicense()", function()
     it("returns nil when no ADEPT_LICENSE present", function()
         local encrypt_dict = "<< /Filter /Standard /V 4 /R 4 /O (xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx) /U (yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy) >>"
         local tmp = createEncryptedPdf(encrypt_dict)
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -1072,12 +1081,11 @@ describe("PDFDocument:extractAdeptLicense()", function()
 
     it("returns license without bookid when EBX_BOOKID is absent", function()
         local license_xml = "<rights>test</rights>"
-        local encrypt_dict = string.format(
-            "<< /Filter /EBX_HANDLER /V 4 /ADEPT_LICENSE (%s) >>",
-            license_xml
-        )
+        local encrypt_dict = string.format("<< /Filter /EBX_HANDLER /V 4 /ADEPT_LICENSE (%s) >>", license_xml)
         local tmp = createEncryptedPdf(encrypt_dict)
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -1092,7 +1100,9 @@ describe("PDFDocument:extractAdeptLicense()", function()
     it("detects EBX_HANDLER encryption filter", function()
         local encrypt_dict = "<< /Filter /EBX_HANDLER /V 4 /ADEPT_LICENSE (test) >>"
         local tmp = createEncryptedPdf(encrypt_dict)
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -1105,7 +1115,9 @@ describe("PDFDocument:extractAdeptLicense()", function()
     it("detects Standard encryption filter", function()
         local encrypt_dict = "<< /Filter /Standard /V 2 /R 3 >>"
         local tmp = createEncryptedPdf(encrypt_dict)
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
@@ -1203,13 +1215,13 @@ describe("incremental updates", function()
         -- Write a fake startxref pointing to an invalid location
         -- to trigger fallback scanning
         f:write("startxref\n")
-        f:write("99999\n")  -- invalid offset
+        f:write("99999\n") -- invalid offset
         f:write("%%EOF\n")
 
         f:close()
 
         local doc = pdfdoc.PDFDocument:new()
-        local ok, err = doc:open(tmp)
+        local ok = doc:open(tmp)
         -- Should still succeed via fallback scanning
         -- (At minimum should have found some xref entries)
         if ok or #doc.xrefs > 0 then
@@ -1218,7 +1230,9 @@ describe("incremental updates", function()
             assert.is_truthy(#ids > 0, "fallback scan should find objects")
         end
 
-        if doc.file then doc:close() end
+        if doc.file then
+            doc:close()
+        end
         os.remove(tmp)
     end)
 end)
@@ -1308,7 +1322,9 @@ end)
 describe("PDFDocument:getCleanTrailer()", function()
     it("removes Encrypt, Prev, and XRefStm from trailer", function()
         local tmp = createMinimalPdf()
-        finally(function() os.remove(tmp) end)
+        finally(function()
+            os.remove(tmp)
+        end)
 
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)

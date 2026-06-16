@@ -3,12 +3,11 @@
 -- with stubbed HTTP (canned Adobe server responses).
 
 describe("Fulfillment internals", function()
-    local fulfillment, crypto, nc, dom, util
+    local fulfillment, crypto, dom, util
 
     setup(function()
         fulfillment = require("adobe.fulfillment")
         crypto = require("adobe.util.crypto")
-        nc = require("adobe.util.nativecrypto")
         dom = require("adobe.util.dom")
         util = require("adobe.util.util")
     end)
@@ -33,7 +32,7 @@ describe("Fulfillment internals", function()
         it("produces deterministic signatures for same input", function()
             local keyWrapper = crypto.key.new()
             local signingKey = keyWrapper.pkey
-            local xmlStr = '<test>deterministic</test>'
+            local xmlStr = "<test>deterministic</test>"
 
             local sig1 = fulfillment._signXmlBody(xmlStr, signingKey)
             local sig2 = fulfillment._signXmlBody(xmlStr, signingKey)
@@ -52,7 +51,7 @@ describe("Fulfillment internals", function()
         it("produces different signatures for different keys", function()
             local key1 = crypto.key.new().pkey
             local key2 = crypto.key.new().pkey
-            local xmlStr = '<same>data</same>'
+            local xmlStr = "<same>data</same>"
 
             local sig1 = fulfillment._signXmlBody(xmlStr, key1)
             local sig2 = fulfillment._signXmlBody(xmlStr, key2)
@@ -202,13 +201,7 @@ describe("Fulfillment internals", function()
 
             local keyWrapper = crypto.key.new()
             local signingKey = keyWrapper.pkey
-            local result, err = fulfillment.fulfill(
-                acsmPath,
-                "urn:uuid:test-user",
-                "urn:uuid:test-device",
-                "test-fingerprint",
-                signingKey
-            )
+            local result, err = fulfillment.fulfill(acsmPath, "urn:uuid:test-user", "urn:uuid:test-device", "test-fingerprint", signingKey)
 
             assert.is.truthy(result, "fulfill failed: " .. tostring(err))
             assert.are.equal("https://test.example.com/fulfillment", result.operatorURL)
@@ -229,7 +222,7 @@ describe("Fulfillment internals", function()
             local tmpDir = DataStorage:getDataDir() .. "/test-fulfill-bad-" .. tostring(os.time())
             koutil.makePath(tmpDir)
             local acsmPath = tmpDir .. "/bad.acsm"
-            koutil.writeToFile('<notAnAcsm/>', acsmPath)
+            koutil.writeToFile("<notAnAcsm/>", acsmPath)
 
             local keyWrapper = crypto.key.new()
             local result, err = fulfillment.fulfill(acsmPath, "u", "d", "f", keyWrapper.pkey)

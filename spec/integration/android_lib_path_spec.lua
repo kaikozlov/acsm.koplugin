@@ -45,8 +45,7 @@ describe("Android system library loader", function()
         it("matches nativecrypto's implementation", function()
             -- Both copies should agree on all arches
             for _, arch in ipairs({ "arm64", "x64", "arm", "x86", "mips", "" }) do
-                assert.are.equal(_nativecrypto_systemLibDir(arch), _zlib_systemLibDir(arch),
-                    "mismatch for arch: " .. tostring(arch))
+                assert.are.equal(_nativecrypto_systemLibDir(arch), _zlib_systemLibDir(arch), "mismatch for arch: " .. tostring(arch))
             end
         end)
     end)
@@ -73,11 +72,9 @@ describe("Android system library loader", function()
 
         it("derives arch-tagged cache filename correctly", function()
             -- arm64: libcrypto.arm64.so
-            assert.are.equal(tmpdir .. "/libcrypto.arm64.so",
-                tmpdir .. "/libcrypto." .. "arm64" .. ".so")
+            assert.are.equal(tmpdir .. "/libcrypto.arm64.so", tmpdir .. "/libcrypto." .. "arm64" .. ".so")
             -- arm: libz.arm.so
-            assert.are.equal(tmpdir .. "/libz.arm.so",
-                tmpdir .. "/libz." .. "arm" .. ".so")
+            assert.are.equal(tmpdir .. "/libz.arm.so", tmpdir .. "/libz." .. "arm" .. ".so")
         end)
 
         it("cleans up legacy untagged cache file", function()

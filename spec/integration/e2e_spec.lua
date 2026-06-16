@@ -9,11 +9,10 @@
 -- to minimize download time in CI.
 
 describe("End-to-end fulfillment #e2e", function()
-    local http, socket, ltn12, koutil, lfs
+    local http, ltn12, koutil, lfs
 
     setup(function()
         http = require("socket.http")
-        socket = require("socket")
         ltn12 = require("ltn12")
         koutil = require("util")
         lfs = require("libs/libkoreader-lfs")
@@ -35,12 +34,12 @@ describe("End-to-end fulfillment #e2e", function()
         local socketutil = require("socketutil")
         socketutil:set_timeout(30, 60)
         local resp = {}
-        local ok, code = http.request{
+        local ok, code = http.request({
             url = SAMPLE_ACSM_URL,
             sink = ltn12.sink.table(resp),
             headers = { ["User-Agent"] = socketutil.USER_AGENT },
             redirect = true,
-        }
+        })
         socketutil:reset_timeout()
 
         assert.is.truthy(ok, "HTTP request failed: " .. tostring(code))
@@ -67,7 +66,6 @@ describe("End-to-end fulfillment #e2e", function()
         local DataStorage = require("datastorage")
         local adobe = require("adobe.adobe")
         local fulfillment = require("adobe.fulfillment")
-        local epub = require("adobe.epub")
 
         local tmpDir = DataStorage:getDataDir() .. "/test-e2e-full-" .. tostring(os.time())
         koutil.makePath(tmpDir)
@@ -78,12 +76,12 @@ describe("End-to-end fulfillment #e2e", function()
         local socketutil = require("socketutil")
         socketutil:set_timeout(30, 60)
         local resp = {}
-        local ok, code = http.request{
+        local ok, code = http.request({
             url = SAMPLE_ACSM_URL,
             sink = ltn12.sink.table(resp),
             headers = { ["User-Agent"] = socketutil.USER_AGENT },
             redirect = true,
-        }
+        })
         socketutil:reset_timeout()
         assert.is.truthy(ok, "Failed to download ACSM: " .. tostring(code))
         koutil.writeToFile(table.concat(resp), acsmPath)
@@ -105,10 +103,7 @@ describe("End-to-end fulfillment #e2e", function()
 
         -- Step 3: Fulfill the loan
         print("[e2e] Processing fulfillment...")
-        local result, err = fulfillment.process(
-            acsmPath, outputPath,
-            creds, deviceUUID, fingerprint,
-            auth_info.certificate)
+        local result, err = fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprint, auth_info.certificate)
         assert.is.truthy(result, "Fulfillment failed: " .. tostring(err))
         assert.are.equal(outputPath, result.outputPath)
         assert.is_true(result.decryptedEntries > 0, "No entries were decrypted")
@@ -123,8 +118,7 @@ describe("End-to-end fulfillment #e2e", function()
         assert.is.truthy(head)
         assert.are.equal("PK", head:sub(1, 2), "Output is not a valid ZIP/EPUB")
 
-        print(string.format("[e2e] Success! Decrypted %d entries, output: %d bytes",
-            result.decryptedEntries, attr.size))
+        print(string.format("[e2e] Success! Decrypted %d entries, output: %d bytes", result.decryptedEntries, attr.size))
 
         os.execute("rm -rf " .. tmpDir)
     end)

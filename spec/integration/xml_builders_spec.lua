@@ -31,7 +31,7 @@ describe("xml.deserialize edge cases", function()
     end)
 
     it("errors on nil input", function()
-        local ok, err = pcall(xml.deserialize, nil)
+        local ok = pcall(xml.deserialize, nil)
         assert.is_false(ok)
     end)
 

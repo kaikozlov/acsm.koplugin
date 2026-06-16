@@ -3,7 +3,6 @@
 local writer = require("adobe.pdf.writer")
 
 describe("PDF writer", function()
-
     ------------------------------------------------------------------
     -- serializeObject: numbers
     ------------------------------------------------------------------
@@ -55,8 +54,7 @@ describe("PDF writer", function()
 
         it("hex-escapes special characters in names", function()
             -- space becomes #20
-            assert.equals("/Name#20With#20Spaces",
-                writer.serializeObject({ name = "Name With Spaces" }))
+            assert.equals("/Name#20With#20Spaces", writer.serializeObject({ name = "Name With Spaces" }))
         end)
 
         it("serializes names from parser PSLiteral if available", function()
@@ -86,23 +84,19 @@ describe("PDF writer", function()
     ------------------------------------------------------------------
     describe("string escaping", function()
         it("escapes parentheses", function()
-            assert.equals("(hello\\(world\\))",
-                writer.serializeObject("hello(world)"))
+            assert.equals("(hello\\(world\\))", writer.serializeObject("hello(world)"))
         end)
 
         it("escapes backslashes", function()
-            assert.equals("(back\\\\slash)",
-                writer.serializeObject("back\\slash"))
+            assert.equals("(back\\\\slash)", writer.serializeObject("back\\slash"))
         end)
 
         it("escapes newlines", function()
-            assert.equals("(line\\nbreak)",
-                writer.serializeObject("line\nbreak"))
+            assert.equals("(line\\nbreak)", writer.serializeObject("line\nbreak"))
         end)
 
         it("escapes carriage returns", function()
-            assert.equals("(col\\r\\n)",
-                writer.serializeObject("col\r\n"))
+            assert.equals("(col\\r\\n)", writer.serializeObject("col\r\n"))
         end)
 
         it("escapes tabs as named escape", function()
@@ -126,8 +120,7 @@ describe("PDF writer", function()
 
         it("serializes nested arrays", function()
             -- Compact format: no space between ] and [
-            assert.equals("[[1 2][3 4]]",
-                writer.serializeObject({ { 1, 2 }, { 3, 4 } }))
+            assert.equals("[[1 2][3 4]]", writer.serializeObject({ { 1, 2 }, { 3, 4 } }))
         end)
 
         it("serializes mixed-type arrays", function()

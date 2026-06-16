@@ -20,7 +20,7 @@ describe("ACSM deletePluginSettings", function()
     -- Returns empty table if directory does not exist.
     local function snapshotFiles(root)
         local results = {}
-        local ok = pcall(function()
+        pcall(function()
             for f in lfs.dir(root) do
                 if f ~= "." and f ~= ".." then
                     local path = root .. "/" .. f
@@ -112,7 +112,9 @@ describe("ACSM deletePluginSettings", function()
 
             -- Override DataStorage to point cache at our tmp dir
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             -- Create a fulfillment map file in the cache dir
             local cache_dir = tmp .. "/cache/acsm.koplugin"
@@ -137,10 +139,12 @@ describe("ACSM deletePluginSettings", function()
             local main = loadFreshPlugin(tmp)
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             -- Populate the in-memory fulfillment map cache
-            local map = main:getFulfillmentMap()
+            main:getFulfillmentMap()
             assert.is.truthy(main._fulfillment_map)
 
             main:deletePluginSettings()
@@ -203,7 +207,9 @@ describe("ACSM deletePluginSettings", function()
             assert.is_false(util.pathExists(main.settings_file))
 
             -- Should not throw
-            local ok, err = pcall(function() main:deletePluginSettings() end)
+            local ok, err = pcall(function()
+                main:deletePluginSettings()
+            end)
             assert.is_true(ok, "deletePluginSettings threw: " .. tostring(err))
 
             rmTmpDir(tmp)
@@ -218,7 +224,9 @@ describe("ACSM deletePluginSettings", function()
             ffiUtil.purgeDir(cache_dir)
             assert.is_false(util.pathExists(cache_dir))
 
-            local ok, err = pcall(function() main:deletePluginSettings() end)
+            local ok, err = pcall(function()
+                main:deletePluginSettings()
+            end)
             assert.is_true(ok, "deletePluginSettings threw: " .. tostring(err))
 
             rmTmpDir(tmp)
@@ -234,7 +242,9 @@ describe("ACSM deletePluginSettings", function()
 
             main:deletePluginSettings()
             -- Second call — everything already cleaned up
-            local ok, err = pcall(function() main:deletePluginSettings() end)
+            local ok, err = pcall(function()
+                main:deletePluginSettings()
+            end)
             assert.is_true(ok, "second deletePluginSettings threw: " .. tostring(err))
 
             rmTmpDir(tmp)
@@ -260,7 +270,9 @@ describe("ACSM deletePluginSettings", function()
 
             -- Override DataStorage so cache lands inside our tmp dir
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             -- Snapshot the empty state (just the dirs we created)
             local before_settings = snapshotFiles(tmp .. "/settings")
@@ -297,10 +309,8 @@ describe("ACSM deletePluginSettings", function()
             -- Verify state was actually written to disk
             local after_settings = snapshotFiles(tmp .. "/settings")
             local after_cache = snapshotFiles(tmp .. "/cache")
-            assert.is_true(#after_settings > #before_settings,
-                "expected settings files to be created, but snapshot unchanged")
-            assert.is_true(#after_cache > #before_cache,
-                "expected cache files to be created, but snapshot unchanged")
+            assert.is_true(#after_settings > #before_settings, "expected settings files to be created, but snapshot unchanged")
+            assert.is_true(#after_cache > #before_cache, "expected cache files to be created, but snapshot unchanged")
 
             -- Now clean up
             main:deletePluginSettings()
@@ -310,15 +320,19 @@ describe("ACSM deletePluginSettings", function()
             local after_cleanup_cache = snapshotFiles(tmp .. "/cache")
 
             -- Settings dir: any remaining files means we forgot to clean something
-            assert.are.same(before_settings, after_cleanup_settings,
-                "settings dir still has files after cleanup — " ..
-                "deletePluginSettings() is missing a cleanup step")
+            assert.are.same(
+                before_settings,
+                after_cleanup_settings,
+                "settings dir still has files after cleanup — " .. "deletePluginSettings() is missing a cleanup step"
+            )
 
             -- Cache dir: the entire acsm.koplugin subdir should be gone,
             -- so only the empty cache/ root should remain (or match before)
-            assert.are.same(before_cache, after_cleanup_cache,
-                "cache dir still has files after cleanup — " ..
-                "deletePluginSettings() is missing a cleanup step")
+            assert.are.same(
+                before_cache,
+                after_cleanup_cache,
+                "cache dir still has files after cleanup — " .. "deletePluginSettings() is missing a cleanup step"
+            )
 
             DataStorage.getDataDir = orig_getDataDir
             rmTmpDir(tmp)
@@ -331,7 +345,9 @@ describe("ACSM deletePluginSettings", function()
             local main = loadFreshPlugin(tmp)
 
             local orig_getDataDir = DataStorage.getDataDir
-            DataStorage.getDataDir = function() return tmp end
+            DataStorage.getDataDir = function()
+                return tmp
+            end
 
             -- Exercise plugin state
             main:loadSettings()
@@ -342,7 +358,7 @@ describe("ACSM deletePluginSettings", function()
             -- (e.g., a new feature added without updating cleanup)
             util.makePath(tmp .. "/cache/acsm.koplugin/extra_data")
             local f = io.open(tmp .. "/cache/acsm.koplugin/extra_data/orphan.lua", "w")
-            f:write('return { leaked = true }')
+            f:write("return { leaked = true }")
             f:close()
 
             main:deletePluginSettings()
@@ -353,8 +369,7 @@ describe("ACSM deletePluginSettings", function()
             -- (This test validates the mechanism; it passes because purgeDir
             -- removes everything including the orphan.)
             local leftover = snapshotFiles(tmp .. "/cache")
-            assert.are.same({}, leftover,
-                "cache dir has leftover files — purgeDir missed something")
+            assert.are.same({}, leftover, "cache dir has leftover files — purgeDir missed something")
 
             DataStorage.getDataDir = orig_getDataDir
             rmTmpDir(tmp)

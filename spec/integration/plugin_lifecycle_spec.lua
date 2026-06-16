@@ -48,10 +48,10 @@ describe("ACSM plugin lifecycle", function()
 
             -- FileManager needs to be created to trigger plugin init
             local FileManager = require("apps/filemanager/filemanager")
-            local fm = FileManager:new{
+            local fm = FileManager:new({
                 dimen = Screen:getSize(),
                 root_path = DataStorage:getDataDir(),
-            }
+            })
             UIManager:show(fm)
             fastforward_ui_events()
 
@@ -80,10 +80,10 @@ describe("ACSM plugin lifecycle", function()
             load_plugin("acsm.koplugin")
 
             local FileManager = require("apps/filemanager/filemanager")
-            local fm = FileManager:new{
+            local fm = FileManager:new({
                 dimen = Screen:getSize(),
                 root_path = DataStorage:getDataDir(),
-            }
+            })
             UIManager:show(fm)
             fastforward_ui_events()
 
@@ -231,7 +231,7 @@ describe("ACSM plugin lifecycle", function()
             main:saveSettings()
 
             -- Reload and verify
-            main.settings = nil  -- force re-read
+            main.settings = nil -- force re-read
             main:loadSettings()
             assert.is_false(main.open_after_download)
             assert.is_false(main.reuse_existing)

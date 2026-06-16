@@ -43,11 +43,7 @@ end
 function pdfcrypt.genkey_v3(bookKey, objid, genno)
     local objidPacked = packLE(bit.bxor(objid, 0x3569ac), 4)
     local gennoPacked = packLE(bit.bxor(genno, 0xca96), 4)
-    local data = bookKey
-        .. string.char(objidPacked:byte(1), gennoPacked:byte(1),
-                       objidPacked:byte(2), gennoPacked:byte(2),
-                       objidPacked:byte(3))
-        .. "sAlT"
+    local data = bookKey .. string.char(objidPacked:byte(1), gennoPacked:byte(1), objidPacked:byte(2), gennoPacked:byte(2), objidPacked:byte(3)) .. "sAlT"
     local hash = md5(data)
     local keyLen = math.min(#bookKey + 5, 16)
     return hash:sub(1, keyLen)
@@ -77,7 +73,6 @@ end
 function pdfcrypt.determineEncryption(bookKey, ebx_V, ebx_type, length)
     length = length or 16
     ebx_V = ebx_V or 4
-    ebx_type = ebx_type or 6
 
     local V
     if length > 0 then
@@ -133,7 +128,7 @@ function pdfcrypt.removeHardening(bookKey, keyType, resourceUUID, deviceUUID, fu
         str = str:gsub("-", "")
         local bytes = {}
         for i = 1, 32, 2 do
-            bytes[#bytes + 1] = string.char(tonumber(str:sub(i, i+1), 16))
+            bytes[#bytes + 1] = string.char(tonumber(str:sub(i, i + 1), 16))
         end
         return table.concat(bytes)
     end
@@ -159,7 +154,9 @@ function pdfcrypt.removeHardening(bookKey, keyType, resourceUUID, deviceUUID, fu
     -- AES-CBC decrypt (matches Python: AES.new(kek, AES.MODE_CBC, kekiv).decrypt(keydata))
     -- no_padding=true because we handle PKCS7 unpad ourselves (matching Python's unpad())
     local decrypted = aesDecrypt(kek, iv, bookKey, true)
-    if not decrypted then return nil end
+    if not decrypted then
+        return nil
+    end
     -- Remove PKCS7 padding (Python unpad from ineptpdf.py)
     if #decrypted > 0 then
         local padLen = decrypted:byte(#decrypted)

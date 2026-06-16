@@ -10,11 +10,10 @@
 -- https://contentserver.adobe.com/fulfillment/URLLink.acsm?action=free&ordersource=operator&resid=urn%3Auuid%3A91797970-de30-4775-a139-7eb160a6688b
 
 describe("End-to-end PDF fulfillment #e2e", function()
-    local http, socket, ltn12, koutil, lfs
+    local http, ltn12, koutil, lfs
 
     setup(function()
         http = require("socket.http")
-        socket = require("socket")
         ltn12 = require("ltn12")
         koutil = require("util")
         lfs = require("libs/libkoreader-lfs")
@@ -34,12 +33,12 @@ describe("End-to-end PDF fulfillment #e2e", function()
         local socketutil = require("socketutil")
         socketutil:set_timeout(30, 60)
         local resp = {}
-        local ok, code = http.request{
+        local ok, code = http.request({
             url = SAMPLE_PDF_ACSM_URL,
             sink = ltn12.sink.table(resp),
             headers = { ["User-Agent"] = socketutil.USER_AGENT },
             redirect = true,
-        }
+        })
         socketutil:reset_timeout()
 
         assert.is.truthy(ok, "HTTP request failed: " .. tostring(code))
@@ -73,12 +72,12 @@ describe("End-to-end PDF fulfillment #e2e", function()
         local socketutil = require("socketutil")
         socketutil:set_timeout(30, 60)
         local resp = {}
-        local ok, code = http.request{
+        local ok, code = http.request({
             url = SAMPLE_PDF_ACSM_URL,
             sink = ltn12.sink.table(resp),
             headers = { ["User-Agent"] = socketutil.USER_AGENT },
             redirect = true,
-        }
+        })
         socketutil:reset_timeout()
         assert.is.truthy(ok, "Failed to download ACSM: " .. tostring(code))
         local acsmBody = table.concat(resp)
@@ -99,10 +98,7 @@ describe("End-to-end PDF fulfillment #e2e", function()
 
         -- Step 3: Fulfill and decrypt
         print("[pdf-e2e] Processing fulfillment...")
-        local result, err = fulfillment.process(
-            acsmPath, outputPath,
-            creds, deviceUUID, fingerprint,
-            auth_info.certificate)
+        local result, err = fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprint, auth_info.certificate)
 
         -- If fulfillment fails, it might be because the PDF format
         -- is not fully supported yet. Report the error clearly.
@@ -159,22 +155,20 @@ describe("End-to-end PDF fulfillment #e2e", function()
                     -- Verify stream decryption produced valid content:
                     -- Decrypted streams should decompress without error
                     -- (or at minimum the raw data should be non-empty).
-                    local ok, decdata = pcall(obj.get_decdata, obj)
-                    if ok and decdata and #decdata > 0 then
+                    local decoded_ok, decdata = pcall(obj.get_decdata, obj)
+                    if decoded_ok and decdata and #decdata > 0 then
                         -- If the stream has FlateDecode, verify it decompresses
                         local filter = obj.dic.Filter or obj.dic["filter"]
                         if filter and tostring(filter) == "FlateDecode" then
                             local inflater = zlib_mod.inflater()
                             local parts = {}
-                            local decomp_ok, decomp_err = inflater:update(
-                                decdata, #decdata, function(ptr, len)
-                                    parts[#parts + 1] = require("ffi").string(ptr, len)
-                                end)
+                            local decomp_ok, decomp_err = inflater:update(decdata, #decdata, function(ptr, len)
+                                parts[#parts + 1] = require("ffi").string(ptr, len)
+                            end)
                             inflater:close()
                             if not decomp_ok then
                                 stream_decode_errors = stream_decode_errors + 1
-                                print(string.format("[pdf-e2e] WARNING: stream %d failed to decompress: %s",
-                                    objid, tostring(decomp_err)))
+                                print(string.format("[pdf-e2e] WARNING: stream %d failed to decompress: %s", objid, tostring(decomp_err)))
                             end
                         end
                     else
@@ -187,12 +181,10 @@ describe("End-to-end PDF fulfillment #e2e", function()
         assert.is_true(streams > 0, "Output PDF has no stream objects")
         -- CRITICAL: no stream should fail to decrypt/decompress
         if stream_decode_errors > 0 then
-            error(string.format("Output PDF has %d streams that failed decryption/decompression",
-                stream_decode_errors))
+            error(string.format("Output PDF has %d streams that failed decryption/decompression", stream_decode_errors))
         end
 
-        print(string.format("[pdf-e2e] Success! Output PDF: %d bytes, %d objects (%d streams, 0 corrupt)",
-            attr.size, loaded, streams))
+        print(string.format("[pdf-e2e] Success! Output PDF: %d bytes, %d objects (%d streams, 0 corrupt)", attr.size, loaded, streams))
 
         outDoc:close()
         os.execute("rm -rf " .. tmpDir)

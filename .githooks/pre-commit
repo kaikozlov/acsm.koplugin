@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[pre-commit] Checking Lua formatting..."
+just fmt-check
+
+echo "[pre-commit] Running luacheck..."
+just lint
+
+echo "[pre-commit] Running tests..."
+just test
+
+echo "[pre-commit] All checks passed."

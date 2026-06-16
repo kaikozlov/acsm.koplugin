@@ -77,7 +77,7 @@ else
     libcrypto = ffi.load("crypto")
 end
 
-ffi.cdef [[
+ffi.cdef([[
 typedef struct evp_pkey_st EVP_PKEY;
 typedef struct rsa_st RSA;
 typedef struct x509_st X509;
@@ -142,7 +142,7 @@ int PKCS12_parse(PKCS12 *p12, const char *pass, EVP_PKEY **pkey, X509 **cert, vo
 void PKCS12_free(PKCS12 *a);
 
 void CRYPTO_free(void *ptr);
-]]
+]])
 
 -- Old Android OpenSSL 1.0.x builds need their global cipher/digest lookup
 -- tables populated before APIs like PKCS12_parse can resolve PBES2 algorithms
@@ -153,8 +153,12 @@ if isAndroid then
         libcrypto.OPENSSL_add_all_algorithms_noconf()
     end)
     if not ok then
-        pcall(function() libcrypto.OpenSSL_add_all_ciphers() end)
-        pcall(function() libcrypto.OpenSSL_add_all_digests() end)
+        pcall(function()
+            libcrypto.OpenSSL_add_all_ciphers()
+        end)
+        pcall(function()
+            libcrypto.OpenSSL_add_all_digests()
+        end)
     end
 end
 
@@ -347,8 +351,8 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
     end
 
     local outl = ffi.new("int[1]")
-    local out = nil      -- lazily allocated, reused across update() calls
-    local out_cap = 0    -- capacity of the current buffer
+    local out = nil -- lazily allocated, reused across update() calls
+    local out_cap = 0 -- capacity of the current buffer
     local finalized = false
 
     local decryptor = {}
@@ -357,7 +361,9 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
     -- If sink is provided, calls sink(ptr, len) with the output buffer.
     -- If no sink, returns (ptr, len) directly.
     function decryptor:update(chunk, sink)
-        if finalized then return nil, "decryptor already finalized" end
+        if finalized then
+            return nil, "decryptor already finalized"
+        end
         local needed = #chunk + 32
         if needed > out_cap then
             out = ffi.new("unsigned char[?]", needed)
@@ -376,7 +382,9 @@ function nativecrypto.aes_cbc_decryptor(key, iv, no_padding)
     -- If sink is provided, calls sink(ptr, len) with any final output.
     -- If no sink, returns (ptr, len) directly.
     function decryptor:finalize(sink)
-        if finalized then return nil, "decryptor already finalized" end
+        if finalized then
+            return nil, "decryptor already finalized"
+        end
         finalized = true
         if out_cap < 32 then
             out = ffi.new("unsigned char[32]")
@@ -407,8 +415,12 @@ function nativecrypto.generate_rsa_key(bits, exp)
     local rsa = libcrypto.RSA_new()
     local bn = libcrypto.BN_new()
     if rsa == nil or bn == nil then
-        if rsa ~= nil then libcrypto.RSA_free(rsa) end
-        if bn ~= nil then libcrypto.BN_free(bn) end
+        if rsa ~= nil then
+            libcrypto.RSA_free(rsa)
+        end
+        if bn ~= nil then
+            libcrypto.BN_free(bn)
+        end
         return nil, "RSA_new/BN_new failed"
     end
 
@@ -422,7 +434,9 @@ function nativecrypto.generate_rsa_key(bits, exp)
 
     local pkey = libcrypto.EVP_PKEY_new()
     if pkey == nil or libcrypto.EVP_PKEY_set1_RSA(pkey, rsa) ~= 1 then
-        if pkey ~= nil then libcrypto.EVP_PKEY_free(pkey) end
+        if pkey ~= nil then
+            libcrypto.EVP_PKEY_free(pkey)
+        end
         libcrypto.RSA_free(rsa)
         return nil, "EVP_PKEY_set1_RSA failed"
     end
