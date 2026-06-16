@@ -148,12 +148,40 @@ function ACSM:registerDocumentRegistryAuxProvider()
         order = 35,
         disable_file = true,
         disable_type = false,
+        -- ACSM is also registered below as a document provider so .acsm files
+        -- are recognized and opened automatically. Do not list it a second time
+        -- via the auxiliary-provider pass in the Open With dialog.
+        enabled_func = function()
+            return false
+        end,
     }
-    -- Register as aux provider for the OpenWith dialog
-    DocumentRegistry:addAuxProvider(provider)
-    -- Also register the .acsm extension so files are visible without "show unsupported",
+    -- Plugin instances are recreated when switching between FileManager and
+    -- ReaderUI, while DocumentRegistry is process-global. addProvider() appends
+    -- blindly, so make this registration idempotent and clean up stale duplicates.
+    local acsm_registered = false
+    for i = #DocumentRegistry.providers, 1, -1 do
+        local entry = DocumentRegistry.providers[i]
+        if entry.extension == "acsm" and entry.provider and entry.provider.provider == self.name then
+            if acsm_registered then
+                table.remove(DocumentRegistry.providers, i)
+            else
+                entry.mimetype = "application/vnd.adobe.adept+xml"
+                entry.provider = provider
+                entry.weight = 100
+                acsm_registered = true
+            end
+        end
+    end
+
+    -- Register the .acsm extension so files are visible without "show unsupported",
     -- and are automatically opened by our plugin without manual provider selection.
-    DocumentRegistry:addProvider("acsm", "application/vnd.adobe.adept+xml", provider, 100)
+    -- addProvider() also records the provider in known_providers, which lets
+    -- FileManager dispatch this plugin-style provider via ACSM:openFile().
+    if not acsm_registered then
+        DocumentRegistry:addProvider("acsm", "application/vnd.adobe.adept+xml", provider, 100)
+    else
+        DocumentRegistry.known_providers[self.name] = provider
+    end
 end
 
 function ACSM:isFileTypeSupported(file)

@@ -72,6 +72,52 @@ describe("ACSM plugin lifecycle", function()
             fm:onClose()
             UIManager:quit()
         end)
+
+        it("registers .acsm provider idempotently", function()
+            local saved_providers = DocumentRegistry.providers
+            local saved_known_provider = DocumentRegistry.known_providers.acsm
+            local saved_filetype_provider = DocumentRegistry.filetype_provider.acsm
+            local saved_mimetype_ext = DocumentRegistry.mimetype_ext["application/vnd.adobe.adept+xml"]
+
+            local function restoreRegistry()
+                DocumentRegistry.providers = saved_providers
+                DocumentRegistry.known_providers.acsm = saved_known_provider
+                DocumentRegistry.filetype_provider.acsm = saved_filetype_provider
+                DocumentRegistry.mimetype_ext["application/vnd.adobe.adept+xml"] = saved_mimetype_ext
+            end
+
+            local ok, err = pcall(function()
+                DocumentRegistry.providers = {}
+                DocumentRegistry.known_providers.acsm = nil
+                DocumentRegistry.filetype_provider.acsm = nil
+                DocumentRegistry.mimetype_ext["application/vnd.adobe.adept+xml"] = nil
+
+                local main = dofile(plugin_path .. "/main.lua")
+                main:registerDocumentRegistryAuxProvider()
+                main:registerDocumentRegistryAuxProvider()
+                main:registerDocumentRegistryAuxProvider()
+
+                local acsm_provider_count = 0
+                local registered_provider
+                for _, provider in ipairs(DocumentRegistry.providers) do
+                    if provider.extension == "acsm" and provider.provider and provider.provider.provider == "acsm" then
+                        acsm_provider_count = acsm_provider_count + 1
+                        registered_provider = provider.provider
+                    end
+                end
+                assert.are.equal(1, acsm_provider_count)
+
+                local acsm_known_provider = DocumentRegistry.known_providers.acsm
+                assert.is.truthy(acsm_known_provider)
+                assert.is_true(acsm_known_provider == registered_provider)
+                assert.are.equal("function", type(acsm_known_provider.enabled_func))
+                assert.is_false(acsm_known_provider.enabled_func("test.acsm"))
+            end)
+            restoreRegistry()
+            if not ok then
+                error(err)
+            end
+        end)
     end)
 
     describe("menu items", function()
