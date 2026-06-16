@@ -179,10 +179,65 @@ describe("ACSM plugin lifecycle", function()
             assert.are.equal("urn:isbn:978-0-00-000000-0", meta.identifier)
         end)
 
+        it("parses book info fields from sample.acsm fixture", function()
+            local main = dofile(plugin_path .. "/main.lua")
+            local fixture_path = plugin_path .. "/spec/integration/fixtures/sample.acsm"
+            local meta = main.parseAcsmMetadata(main, fixture_path)
+            assert.is.truthy(meta)
+            assert.are.equal("Arthur Conan Doyle", meta.creator)
+            assert.are.equal("Gutenberg Foundation", meta.publisher)
+            assert.are.equal("en", meta.language)
+            assert.are.equal("application/epub+zip", meta.format)
+        end)
+
         it("returns nil for non-existent file", function()
             local main = dofile(plugin_path .. "/main.lua")
             local meta = main.parseAcsmMetadata(main, "/nonexistent/path.acsm")
             assert.is_nil(meta)
+        end)
+    end)
+
+    describe("Book information integration", function()
+        it("provides ACSM metadata as KOReader doc props", function()
+            local main = dofile(plugin_path .. "/main.lua")
+            main:registerBookInfoProvider()
+
+            local BookInfo = require("apps/filemanager/filemanagerbookinfo")
+            local bookinfo = BookInfo:new({ ui = {} })
+            local fixture_path = plugin_path .. "/spec/integration/fixtures/sample.acsm"
+            local props = bookinfo:getDocProps(fixture_path, nil, true)
+
+            assert.are.equal("The Adventures of Sherlock Holmes", props.title)
+            assert.are.equal("The Adventures of Sherlock Holmes", props.display_title)
+            assert.are.equal("Arthur Conan Doyle", props.authors)
+            assert.are.equal("en", props.language)
+            assert.is.truthy(props.description:find("Target format: EPUB", 1, true))
+            assert.is.truthy(props.description:find("Gutenberg Foundation", 1, true))
+            assert.is.truthy(props.description:find("urn:isbn:978%-0%-00%-000000%-0"))
+        end)
+
+        it("uses ACSM metadata even when caller passes empty book props", function()
+            local main = dofile(plugin_path .. "/main.lua")
+            main:registerBookInfoProvider()
+
+            local BookInfo = require("apps/filemanager/filemanagerbookinfo")
+            local bookinfo = BookInfo:new({ ui = {} })
+            local fixture_path = plugin_path .. "/spec/integration/fixtures/sample.acsm"
+
+            bookinfo:show(fixture_path, {})
+            fastforward_ui_events()
+
+            local rows = {}
+            for _, row in ipairs(bookinfo.kvp_widget.kv_pairs) do
+                if type(row) == "table" then
+                    rows[row[1]] = row[2]
+                end
+            end
+
+            assert.are.equal("⁨The Adventures of Sherlock Holmes⁩", rows["Title:"])
+            assert.are.equal("⁨Arthur Conan Doyle⁩", rows["Author(s):"])
+            assert.are.equal("en", rows["Language:"])
+            assert.is.truthy(rows["Description:"]:find("Target format: EPUB", 1, true))
         end)
     end)
 

@@ -51,6 +51,7 @@ end
 function ACSM:init()
     self.ui.menu:registerToMainMenu(self)
     self:registerDocumentRegistryAuxProvider()
+    self:registerBookInfoProvider()
 end
 
 function ACSM:onFlushSettings()
@@ -188,12 +189,19 @@ function ACSM:isFileTypeSupported(file)
     return util.getFileNameSuffix(file):lower() == "acsm"
 end
 
---- Parse metadata from an ACSM file.
--- Extracts dc:title and resource UUID directly from the ACSM XML —
--- no need to download the EPUB first.
--- @string acsm_path path to the ACSM file
--- @treturn table{ title, resourceId, identifier } or nil on failure
-function ACSM:parseAcsmMetadata(acsm_path)
+local function firstMetadataValue(meta, key)
+    if type(meta) ~= "table" then
+        return nil
+    end
+    local raw = meta[key]
+    if type(raw) == "table" then
+        return raw[1]
+    elseif type(raw) == "string" then
+        return raw
+    end
+end
+
+local function parseAcsmMetadataFile(acsm_path)
     local content = io.open(acsm_path, "rb")
     if not content then
         return nil
@@ -218,33 +226,112 @@ function ACSM:parseAcsmMetadata(acsm_path)
 
     local resource = rii.resource
     local meta = rii.metadata
+    local resource_item = rii.resourceItem
+    local asset = resource_item and resource_item.asset
 
-    local title
-    if meta then
-        local raw = meta["dc:title"]
-        if type(raw) == "table" then
-            title = raw[1]
-        elseif type(raw) == "string" then
-            title = raw
-        end
+    return {
+        title = firstMetadataValue(meta, "dc:title"),
+        creator = firstMetadataValue(meta, "dc:creator"),
+        identifier = firstMetadataValue(meta, "dc:identifier"),
+        publisher = firstMetadataValue(meta, "dc:publisher"),
+        language = firstMetadataValue(meta, "dc:language"),
+        subject = firstMetadataValue(meta, "dc:subject"),
+        description = firstMetadataValue(meta, "dc:description"),
+        resourceId = resource, -- e.g. "urn:uuid:d976a1af-..."
+        format = firstMetadataValue(meta, "dc:format") or (asset and asset.assetType), -- e.g. "application/pdf" or "application/epub+zip"
+    }
+end
+
+local function targetFormatLabel(format)
+    if format == "application/pdf" then
+        return "PDF"
+    elseif format == "application/epub+zip" then
+        return "EPUB"
+    end
+    return format
+end
+
+local function acsmMetadataToDocProps(acsm_meta)
+    if not acsm_meta then
+        return nil
     end
 
-    local identifier
-    if meta then
-        local raw = meta["dc:identifier"]
-        if type(raw) == "table" then
-            identifier = raw[1]
-        elseif type(raw) == "string" then
-            identifier = raw
-        end
+    local description_parts = {}
+    if acsm_meta.description then
+        table.insert(description_parts, acsm_meta.description)
+    end
+    table.insert(description_parts, _("Adobe ACSM loan file."))
+    if acsm_meta.format then
+        table.insert(description_parts, T(_("Target format: %1"), targetFormatLabel(acsm_meta.format)))
+    end
+    if acsm_meta.publisher then
+        table.insert(description_parts, T(_("Publisher: %1"), acsm_meta.publisher))
+    end
+    if acsm_meta.identifier then
+        table.insert(description_parts, T(_("Identifier: %1"), acsm_meta.identifier))
+    end
+    if acsm_meta.resourceId then
+        table.insert(description_parts, T(_("Resource ID: %1"), acsm_meta.resourceId))
     end
 
     return {
-        title = title,
-        resourceId = resource, -- e.g. "urn:uuid:d976a1af-..."
-        identifier = identifier, -- e.g. ISBN
-        format = meta and meta["dc:format"] or nil, -- e.g. "application/pdf" or "application/epub+zip"
+        title = acsm_meta.title,
+        authors = acsm_meta.creator,
+        language = acsm_meta.language,
+        keywords = acsm_meta.subject,
+        description = table.concat(description_parts, "\n"),
+        identifiers = acsm_meta.identifier,
     }
+end
+
+local function isAcsmFile(file)
+    return type(file) == "string" and util.getFileNameSuffix(file):lower() == "acsm"
+end
+
+local function getAcsmDocProps(BookInfo, file)
+    local acsm_meta = parseAcsmMetadataFile(file)
+    if acsm_meta then
+        return BookInfo.extendProps(acsmMetadataToDocProps(acsm_meta), file)
+    end
+end
+
+function ACSM:registerBookInfoProvider()
+    local BookInfo = require("apps/filemanager/filemanagerbookinfo")
+    if BookInfo._acsm_getDocProps_original then
+        return
+    end
+
+    BookInfo._acsm_getDocProps_original = BookInfo.getDocProps
+    BookInfo.getDocProps = function(bookinfo, file, book_props, no_open_document)
+        if isAcsmFile(file) then
+            local acsm_props = getAcsmDocProps(BookInfo, file)
+            if acsm_props then
+                return acsm_props
+            end
+        end
+        return BookInfo._acsm_getDocProps_original(bookinfo, file, book_props, no_open_document)
+    end
+
+    BookInfo._acsm_show_original = BookInfo.show
+    BookInfo.show = function(bookinfo, doc_settings_or_file, book_props)
+        local file = doc_settings_or_file
+        if type(doc_settings_or_file) == "table" and doc_settings_or_file.readSetting then
+            file = doc_settings_or_file:readSetting("doc_path")
+        end
+        if isAcsmFile(file) then
+            book_props = getAcsmDocProps(BookInfo, file) or book_props
+        end
+        return BookInfo._acsm_show_original(bookinfo, doc_settings_or_file, book_props)
+    end
+end
+
+--- Parse metadata from an ACSM file.
+-- Extracts dc:title and resource UUID directly from the ACSM XML —
+-- no need to download the EPUB first.
+-- @string acsm_path path to the ACSM file
+-- @treturn table{ title, creator, identifier, publisher, language, subject, description, resourceId, format } or nil on failure
+function ACSM:parseAcsmMetadata(acsm_path)
+    return parseAcsmMetadataFile(acsm_path)
 end
 
 --- Build the output path for a fulfilled EPUB or PDF.
