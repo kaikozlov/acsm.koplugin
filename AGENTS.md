@@ -96,6 +96,101 @@ fail with a network or HTTP error.
 - **Wrapper**: `/usr/local/bin/busted-koreader` invokes KOReader's `luajit`
   with `LUA_PATH` pointing at busted and KOReader modules.
 
+### Driving real KOReader in tests
+
+The Docker environment runs the **real KOReader binary, headless** — it is not a
+mocked host tier. Every busted spec can `require()` any real KOReader module
+(`FileManager`, `ReaderUI`, `UIManager`, `DocumentRegistry`, `PluginLoader`,
+`BookInfo`, …) and drive it directly, exactly as a device would. **Prefer this
+over hand-rolled stubs.** When KOReader is how your code gets called, make the
+test call it the same way.
+
+The bootstrap (`commonrequire.lua`) exposes three globals for this:
+
+| Helper | What it does |
+|---|---|
+| `disable_plugins()` | Wipes the PluginLoader cache so only what you explicitly load runs |
+| `load_plugin("acsm.koplugin")` | Discovers and loads just our plugin |
+| `fastforward_ui_events()` | Drains `UIManager`'s scheduled tasks and runs one input loop. Call this **after** `UIManager:show(widget)` so the widget actually initializes |
+
+Canonical pattern (see `spec/integration/plugin_lifecycle_spec.lua`):
+
+```lua
+disable_plugins()
+load_plugin("acsm.koplugin")
+
+local FileManager = require("apps/filemanager/filemanager")
+local fm = FileManager:new({
+    dimen = Screen:getSize(),
+    root_path = DataStorage:getDataDir(),
+})
+UIManager:show(fm)
+fastforward_ui_events()  -- widget is not ready until this runs
+
+-- Now drive the real object the same way the UI does:
+local props = fm.bookinfo:getDocProps(fixture, nil, true)
+
+fm:onClose()
+UIManager:quit()
+```
+
+#### Why this matters: test the entry point, not the function
+
+A common trap: your unit test calls the plugin function in isolation, it passes,
+but the feature still breaks on-device because **KOReader reaches it through a
+different path**. Test through KOReader's real entry point whenever one exists.
+
+Concrete case from this project: `BookInfo:getDocProps()` returned correct ACSM
+metadata when called directly, but the actual Book Information screen is opened
+via `BookInfo:show(file, book_props)` where the caller (FileManager / CoverBrowser)
+supplies `book_props` — often an empty/stale table — which **bypasses**
+`getDocProps()` entirely. The bug was invisible until a test constructed a real
+`FileManager` and called `fm.bookinfo:show(fixture, {})`, then read back the
+rendered rows.
+
+When integrating with a KOReader subsystem:
+
+1. Find the real caller in `REFERENCE/koreader/` (grep for the method/event).
+2. Reproduce that caller's invocation in a spec — including the arguments it
+   actually passes (e.g. an empty `book_props` table, not `nil`).
+3. Inspect rendered output, not just return values.
+
+#### Inspecting widgets and KOReader internals
+
+After `UIManager:show(widget)` + `fastforward_ui_events()`, the widget's internal
+state is live and readable. For `KeyValuePage` (used by Book Information):
+
+```lua
+fm.bookinfo:show(fixture, {})
+fastforward_ui_events()
+
+local rows = {}
+for _, row in ipairs(fm.bookinfo.kvp_widget.kv_pairs) do
+    if type(row) == "table" then rows[row[1]] = row[2] end
+end
+assert.are.equal("The Adventures of Sherlock Holmes", rows["Title:"])
+```
+
+#### Throwaway probe specs
+
+For debugging, write an ad-hoc spec, mount it into the container, and read
+`print()` output to see what KOReader actually returns. Useful for tracing
+“when is X called, with what arguments, what does it return?”
+
+```bash
+# write /tmp/probe_spec.lua, then:
+docker run --rm -e SDL_VIDEODRIVER=dummy \
+  -v "$PWD:/opt/plugin" \
+  -v /tmp/probe_spec.lua:/tmp/probe_spec.lua \
+  -e PLUGIN_NAME=acsm \
+  ghcr.io/kaikozlov/koplugin-dev:v2026.03_2 \
+  busted-koreader --verbose --helper=/opt/koplugin-dev/commonrequire.lua \
+  /tmp/probe_spec.lua
+```
+
+`print()` lines appear inline in the busted output. Keep these out of
+`spec/` — they are scratch space, not committed tests.
+
 ### Key files
 
 - `justfile` — `setup`, `install-hooks`, `test`, `test-e2e`, `test-all`, `test-filter`, `lint`, `fmt-check`, `fmt`, `build`, `shell`
