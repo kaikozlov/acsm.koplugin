@@ -9,9 +9,9 @@
 #   just build     # build a release zip (versioned from _meta.lua)
 #   just shell     # drop into the container
 
-plugin_name          := "acsm"
+plugin_name := "acsm"
 koplugin_dev_version := "v2026.03_2"
-image                := "ghcr.io/kaikozlov/koplugin-dev:" + koplugin_dev_version
+image := "ghcr.io/kaikozlov/koplugin-dev:" + koplugin_dev_version
 
 # Version is read from _meta.lua so there is a single source of truth.
 version := `sed -n 's/.*version *= *"\([^"]*\)".*/\1/p' _meta.lua`
@@ -23,18 +23,18 @@ sdl_env := "-e SDL_VIDEODRIVER=dummy"
 mount := "-v " + justfile_directory() + ":/opt/plugin -e PLUGIN_NAME=" + plugin_name
 
 # Standard run (no network)
-run          := "docker run --rm "       + sdl_env + " " + mount + " " + image
+run := "docker run --rm " + sdl_env + " " + mount + " " + image
 # Network-enabled run (for e2e tests that hit real servers)
-run_network  := "docker run --rm --network=host " + sdl_env + " " + mount + " " + image
+run_network := "docker run --rm --network=host " + sdl_env + " " + mount + " " + image
 # Interactive run
-run_it       := "docker run --rm -it "   + sdl_env + " " + mount + " " + image
+run_it := "docker run --rm -it " + sdl_env + " " + mount + " " + image
 
 # =============================================================================
 # Default
 # =============================================================================
 
-[private]
 [group('default')]
+[private]
 default:
     @just --list
 
@@ -45,7 +45,7 @@ default:
 # Pull the koplugin-dev image
 [group('setup')]
 setup:
-    docker pull {{image}}
+    docker pull {{ image }}
 
 # =============================================================================
 # Testing
@@ -54,7 +54,7 @@ setup:
 # Run all tests (excludes e2e)
 [group('test')]
 test:
-    {{run}} busted-koreader --verbose \
+    {{ run }} busted-koreader --verbose \
         --helper=/opt/koplugin-dev/commonrequire.lua \
         --exclude-tags=e2e \
         /opt/plugin/spec/
@@ -62,7 +62,7 @@ test:
 # Run e2e tests only (requires network — hits real Adobe servers)
 [group('test')]
 test-e2e:
-    {{run_network}} busted-koreader --verbose \
+    {{ run_network }} busted-koreader --verbose \
         --helper=/opt/koplugin-dev/commonrequire.lua \
         --filter=e2e \
         /opt/plugin/spec/
@@ -70,16 +70,16 @@ test-e2e:
 # Run all tests including e2e (requires network)
 [group('test')]
 test-all:
-    {{run_network}} busted-koreader --verbose \
+    {{ run_network }} busted-koreader --verbose \
         --helper=/opt/koplugin-dev/commonrequire.lua \
         /opt/plugin/spec/
 
 # Run tests matching a pattern, e.g. `just test-filter Crypto`
 [group('test')]
 test-filter filter:
-    {{run}} busted-koreader --verbose \
+    {{ run }} busted-koreader --verbose \
         --helper=/opt/koplugin-dev/commonrequire.lua \
-        --filter="{{filter}}" \
+        --filter="{{ filter }}" \
         /opt/plugin/spec/
 
 # =============================================================================
@@ -89,7 +89,7 @@ test-filter filter:
 # Run luacheck inside the container
 [group('lint')]
 lint:
-    {{run}} luacheck /opt/plugin
+    {{ run }} luacheck /opt/plugin
 
 # =============================================================================
 # Build
@@ -101,7 +101,7 @@ lint:
 build:
     #!/usr/bin/env bash
     set -euo pipefail
-    version="{{version}}"
+    version="{{ version }}"
     echo "Building acsm.koplugin ${version}..."
     rm -rf build
     mkdir -p build
@@ -119,12 +119,12 @@ build:
 # Drop into a shell in the dev container
 [group('interactive')]
 shell:
-    {{run_it}} /bin/bash
+    {{ run_it }} /bin/bash
 
 # Start KOReader's LuaJIT REPL
 [group('interactive')]
 lua:
-    {{run_it}} /opt/lib/koreader/luajit
+    {{ run_it }} /opt/lib/koreader/luajit
 
 # =============================================================================
 # Cleanup
