@@ -25,3 +25,5 @@ run_check() {
 run_check "Lua formatting" just fmt-check
 run_check "luacheck" just lint
 run_check "tests" just test
+
+echo "[pre-commit] Checks passed."
