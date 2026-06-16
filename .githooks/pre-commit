@@ -4,13 +4,24 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-echo "[pre-commit] Checking Lua formatting..."
-just fmt-check
+run_check() {
+    local label="$1"
+    shift
 
-echo "[pre-commit] Running luacheck..."
-just lint
+    local output
+    output="$(mktemp)"
+    if "$@" >"$output" 2>&1; then
+        rm -f "$output"
+        return 0
+    fi
 
-echo "[pre-commit] Running tests..."
-just test
+    local status=$?
+    echo "[pre-commit] ${label} failed:" >&2
+    cat "$output" >&2
+    rm -f "$output"
+    return "$status"
+}
 
-echo "[pre-commit] All checks passed."
+run_check "Lua formatting" just fmt-check
+run_check "luacheck" just lint
+run_check "tests" just test
