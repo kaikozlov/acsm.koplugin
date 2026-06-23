@@ -232,7 +232,7 @@ Key PDF modules:
 
 ### Test coverage overview
 
-442 tests total (excluding e2e). Key areas:
+449 tests total (excluding e2e). Key areas:
 
 | Area | Spec file | Tests |
 |---|---|---|
@@ -263,8 +263,11 @@ Key PDF modules:
 | util.lua (base64, copy, endpoint) | `integration/util_spec.lua` | 17 |
 | adobe.lua isolated (serialize, restore) | `integration/adobe_spec.lua` | 10 |
 | Cross-validation | `integration/cross_validate_spec.lua` | 33 |
+| External-open user patch (routing) | `integration/userpatch_spec.lua` | 5 |
+| External-open user patch (real instances) | `integration/userpatch_e2e_spec.lua` | 2 |
 | E2E EPUB (Adobe servers) | `integration/e2e_spec.lua` | 2 |
 | E2E PDF (Adobe servers) | `integration/pdf_e2e_spec.lua` | 2 |
+| E2E patch + real fulfillment (Adobe servers) | `integration/userpatch_e2e_fulfillment_spec.lua` | 1 |
 
 ### Key API note: crypto.key wrapper vs raw PKey
 
