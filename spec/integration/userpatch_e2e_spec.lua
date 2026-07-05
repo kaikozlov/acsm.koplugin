@@ -11,11 +11,12 @@
 --
 -- Network is the only thing stubbed: we replace the real plugin instance's
 -- openFile with a spy at the last mile, so the full real dispatch chain
--- (patch → FileManager:openFile → DocumentRegistry:getProvider(include_aux)
--- → self.acsm:openFile) is exercised without hitting Adobe servers.
+-- (patch → FileManager:showFiles → PluginLoader discovery → FileManager:openFile
+-- → DocumentRegistry:getProvider(include_aux) → self.acsm:openFile) is exercised
+-- without hitting Adobe servers.
 
 describe("ACSM external-open user patch (real instances)", function()
-    local ReaderUI, FileManager, UIManager, Screen, DataStorage
+    local ReaderUI, FileManager, UIManager, Screen, DataStorage, PluginLoader
     local plugin_path, patch_path, acsm_fixture
     local real_showReader
 
@@ -26,6 +27,7 @@ describe("ACSM external-open user patch (real instances)", function()
         UIManager = require("ui/uimanager")
         Screen = require("device").screen
         DataStorage = require("datastorage")
+        PluginLoader = require("pluginloader")
         patch_path = plugin_path .. "/patches/2-acsm-open-via-filemanager.lua"
         acsm_fixture = plugin_path .. "/spec/integration/fixtures/sample.acsm"
         real_showReader = ReaderUI.showReader
@@ -57,9 +59,12 @@ describe("ACSM external-open user patch (real instances)", function()
         end
     end
 
-    it("cold start: spins up real FileManager and routes to its plugin", function()
-        disable_plugins()
-        load_plugin("acsm.koplugin")
+    it("cold start: discovers the plugin, spins up real FileManager, and routes to it", function()
+        -- Match KOReader startup: plugins have not been manually preloaded.
+        -- FileManager:showFiles() must discover/load them via PluginLoader:loadPlugins().
+        PluginLoader.enabled_plugins = nil
+        PluginLoader.disabled_plugins = nil
+        PluginLoader.loaded_plugins = nil
 
         -- Apply the patch fresh (no instance exists yet).
         ReaderUI.showReader = real_showReader
@@ -70,9 +75,10 @@ describe("ACSM external-open user patch (real instances)", function()
         -- This is what koreader.app does on a cold launch with a file arg.
         ReaderUI:showReader(acsm_fixture)
 
-        -- showFiles ran synchronously → a real FileManager now exists with the
-        -- real plugin instantiated by PluginLoader inside FileManager:init.
+        -- showFiles ran synchronously → a real FileManager now exists and has
+        -- discovered/instantiated the real plugin via PluginLoader inside FileManager:init.
         assert.is.truthy(FileManager.instance, "patch did not spin up FileManager")
+        assert.is.truthy(FileManager.instance.acsm, "FileManager did not discover/load the ACSM plugin")
 
         -- Intercept before the nextTick fires so we don't hit the network.
         local reset = spyPluginOpenFile(FileManager.instance)
