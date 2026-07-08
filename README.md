@@ -35,6 +35,10 @@ The resulting EPUB is saved next to the original `.acsm` file. It's a standard `
 
 Tested on Kindle with KOReader v2026.03. Should work on any KOReader device (Kobo, reMarkable, PocketBook, etc.) — the plugin uses only libraries bundled with standard KOReader builds.
 
+### Troubleshooting
+
+**"cannot open document … `.acsm`" when opening from an external app** (e.g. the PocketBook library): this happens when KOReader is launched with the `.acsm` as a startup argument. An optional [user patch](./patches/) fixes it — see [`patches/README.md`](./patches/README.md) for details and installation.
+
 ### Acknowledgments
 
 [acsm-calibre-plugin](https://github.com/Leseratte10/acsm-calibre-plugin) by Leseratte10 — reference implementation for the ADEPT protocol.
