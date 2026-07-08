@@ -10,7 +10,7 @@
 #   just shell     # drop into the container
 
 plugin_name := "acsm"
-koplugin_dev_version := "v2026.03_2"
+koplugin_dev_version := "v2026.03_4"
 image := "ghcr.io/kaikozlov/koplugin-dev:" + koplugin_dev_version
 
 # Version is read from _meta.lua so there is a single source of truth.
