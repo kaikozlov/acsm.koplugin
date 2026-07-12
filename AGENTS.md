@@ -47,7 +47,8 @@ just fmt                   # format Lua code with stylua
 just check                 # fmt + lint + test in one container (pre-commit)
 ```
 
-Shared recipes are imported from a sibling `../koplugin-dev/shared.just` checkout.
+Shared recipes are vendored at `just/shared.just` (from koplugin-dev). Refresh with
+`just sync-shared` when upstream recipes change, then commit the file.
 Product packaging stays local: `just build`.
 
 ### Spec layout
@@ -198,7 +199,8 @@ docker run --rm -e SDL_VIDEODRIVER=dummy \
 
 ### Key files
 
-- `justfile` — imports `../koplugin-dev/shared.just`; local `build` zip recipe
+- `justfile` — imports `./just/shared.just`; local `build` zip + `sync-shared`
+- `just/shared.just` — vendored shared recipes from koplugin-dev
 - `spec/integration/fixtures/` — test fixtures (sample ACSM, etc.)
 - `adobe/util/adobehash.lua` — extracted hash buffer construction (testable separately from fulfillment)
 

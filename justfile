@@ -1,6 +1,6 @@
 # justfile for acsm.koplugin
 #
-# Shared recipes come from a sibling checkout of koplugin-dev.
+# Shared recipes are vendored from koplugin-dev (just/shared.just).
 # No local toolchain required — just Docker (and `just`).
 #
 # Quick start:
@@ -8,9 +8,14 @@
 #   just test      # run all tests (quiet; V=1 for verbose)
 #   just build     # build a release zip (versioned from _meta.lua)
 #   just shell     # drop into the container
+#
+# When shared recipes change upstream:
+#   just sync-shared   # refresh just/shared.just (then commit)
 
 plugin_name := "acsm"
 koplugin_dev_version := "v2026.03_4"
+# Git ref used by `just sync-shared` (recipe source). Independent of the image pin.
+koplugin_dev_ref := env("KOPLUGIN_DEV_REF", "main")
 plugin_path := "/opt/plugin"
 spec_dir := "spec"
 lua_paths := "adobe spec main.lua _meta.lua"
@@ -21,7 +26,32 @@ exclude_tags := "e2e"
 # Version is read from _meta.lua so there is a single source of truth.
 version := `sed -n 's/.*version *= *"\([^"]*\)".*/\1/p' _meta.lua`
 
-import "../koplugin-dev/shared.just"
+import "./just/shared.just"
+
+# =============================================================================
+# Setup (plugin-local)
+# =============================================================================
+
+# Refresh just/shared.just from upstream koplugin-dev
+[group('setup')]
+sync-shared:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ref="{{ koplugin_dev_ref }}"
+    mkdir -p just
+    tmp="$(mktemp)"
+    url="https://raw.githubusercontent.com/kaikozlov/koplugin-dev/${ref}/shared.just"
+    echo "Fetching ${url}"
+    curl -fsSL "$url" -o "$tmp"
+    {
+        echo "# Vendored from https://github.com/kaikozlov/koplugin-dev"
+        echo "# Ref: ${ref}"
+        echo "# Refresh with: just sync-shared"
+        echo
+        cat "$tmp"
+    } > just/shared.just
+    rm -f "$tmp"
+    echo "Updated just/shared.just from koplugin-dev@${ref}"
 
 # =============================================================================
 # Build (product-specific)
