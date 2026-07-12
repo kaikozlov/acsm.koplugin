@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+defaults:
+  run:
+    working-directory: acsm.koplugin
+
+jobs:
+  test:
+    name: Docker Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@v7
+        with:
+          path: acsm.koplugin
+
+      - name: Check out koplugin-dev (shared.just)
+        uses: actions/checkout@v7
+        with:
+          repository: kaikozlov/koplugin-dev
+          path: koplugin-dev
+
+      - name: Install just
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+            | bash -s -- --to "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/just" --version
+
+      - name: Set up development image
+        run: just setup
+
+      - name: Check formatting
+        run: just fmt-check
+
+      - name: Run linters
+        run: just lint
+
+      - name: Run tests
+        run: just test

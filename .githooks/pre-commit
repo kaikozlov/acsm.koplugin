@@ -1,29 +1,28 @@
 #!/usr/bin/env bash
+#
+# Pre-commit hook for acsm.koplugin
+# Formats, lints, and tests in a single koplugin-dev container
+#
+
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-run_check() {
-    local label="$1"
-    shift
+# Remember staged paths so we can re-stage after auto-format without
+# accidentally adding unrelated untracked files.
+staged_files="$(git diff --cached --name-only --diff-filter=ACM || true)"
 
-    local output
-    output="$(mktemp)"
-    if "$@" >"$output" 2>&1; then
-        rm -f "$output"
-        return 0
-    fi
+echo "[pre-commit] Running just check (fmt + lint + test)..."
+just check
 
-    local status=$?
-    echo "[pre-commit] ${label} failed:" >&2
-    cat "$output" >&2
-    rm -f "$output"
-    return "$status"
-}
-
-run_check "Lua formatting" just fmt-check
-run_check "luacheck" just lint
-run_check "tests" just test
+# Re-stage previously staged files that still exist (picks up formatter edits).
+if [ -n "$staged_files" ]; then
+    while IFS= read -r file; do
+        if [ -n "$file" ] && [ -f "$file" ]; then
+            git add -- "$file"
+        fi
+    done <<<"$staged_files"
+fi
 
 echo "[pre-commit] Checks passed."

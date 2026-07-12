@@ -928,7 +928,8 @@ describe("PDFDocument:_expandObjStm()", function()
         local compressed = rawDeflate(stm_content)
 
         -- Build the ObjStm stream object (obj 3)
-        local stm_obj_str = string.format("3 0 obj\n<< /Type /ObjStm /N 2 /First %d /Length %d /Filter /FlateDecode >>\nstream\r\n", #header, #compressed)
+        local stm_obj_str =
+            string.format("3 0 obj\n<< /Type /ObjStm /N 2 /First %d /Length %d /Filter /FlateDecode >>\nstream\r\n", #header, #compressed)
         stm_obj_str = stm_obj_str .. compressed .. "\r\nendstream\nendobj\n"
 
         -- Build xref that knows obj 4 and 5 are in ObjStm 3

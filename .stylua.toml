@@ -1,5 +1,5 @@
 syntax = "Lua52"
 indent_type = "Spaces"
 indent_width = 4
-column_width = 160
+column_width = 150
 quote_style = "AutoPreferDouble"

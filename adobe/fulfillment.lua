@@ -359,7 +359,8 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     local activationURL = creds.activationURL or "https://adeactivate.adobe.com/adept"
     if not creds.activationURL and creds.activationXml then
         local activationParsed = xml.deserialize(creds.activationXml)
-        local activationToken = activationParsed.activationInfo and activationParsed.activationInfo.activationToken or activationParsed.activationToken
+        local activationToken = activationParsed.activationInfo and activationParsed.activationInfo.activationToken
+            or activationParsed.activationToken
         if activationToken and activationToken.activationURL then
             activationURL = activationToken.activationURL
             if type(activationURL) == "table" then

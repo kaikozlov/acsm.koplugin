@@ -329,7 +329,8 @@ describe("Memory-bounded decryption", function()
             assert.is_true(
                 growthKB < 200,
                 string.format(
-                    "PdfWriter heap grew by %.0fKB between batches — should be < 200KB.\n" .. "This suggests writer is accumulating object references.",
+                    "PdfWriter heap grew by %.0fKB between batches — should be < 200KB.\n"
+                        .. "This suggests writer is accumulating object references.",
                     growthKB
                 )
             )

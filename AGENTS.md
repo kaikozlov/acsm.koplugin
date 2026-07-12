@@ -34,7 +34,8 @@ code paths as the plugin on a real device.
 
 ```bash
 just setup                 # install git hooks and pull the koplugin-dev image (one-time)
-just test                  # run all tests (excludes e2e network tests)
+just test                  # run all tests (quiet; excludes e2e)
+V=1 just test              # same, with full busted --verbose output
 just test-e2e              # run e2e tests (hits real Adobe servers)
 just test-all              # run everything including e2e
 just test-filter Crypto    # run a subset by pattern
@@ -43,7 +44,11 @@ just shell                 # drop into bash inside the container
 just lint                  # run luacheck inside the container
 just fmt-check             # check Lua formatting with stylua
 just fmt                   # format Lua code with stylua
+just check                 # fmt + lint + test in one container (pre-commit)
 ```
+
+Shared recipes are imported from a sibling `../koplugin-dev/shared.just` checkout.
+Product packaging stays local: `just build`.
 
 ### Spec layout
 
@@ -55,7 +60,7 @@ All specs live under `spec/` and run together via `busted-koreader`:
 | `spec/integration/*_spec.lua` | Cross-module tests (lifecycle, flows, DOM, crypto round-trips) | Real KOReader libs, real crypto |
 | `spec/integration/e2e_spec.lua` | Full activation → fulfillment → decrypt | Tagged `#e2e`, requires network |
 
-The only tag in use is `#e2e` — `make test` excludes it because it hits
+The only tag in use is `#e2e` — `just test` excludes it because it hits
 Adobe's servers and needs network access.
 
 ### E2E tests
@@ -84,7 +89,7 @@ fail with a network or HTTP error.
 
 ### How it works
 
-- **Image**: `ghcr.io/kaikozlov/koplugin-dev:v2026.03_2` — unified dev image
+- **Image**: `ghcr.io/kaikozlov/koplugin-dev:v2026.03_4` — unified dev image
   with KOReader + busted + luacheck + stylua.
 - **KOReader**: extracted to `/opt/lib/koreader/`, includes bundled `luajit`.
 - **Plugin**: bind-mounted at `/opt/plugin`, auto-symlinked into KOReader's
@@ -183,7 +188,7 @@ docker run --rm -e SDL_VIDEODRIVER=dummy \
   -v "$PWD:/opt/plugin" \
   -v /tmp/probe_spec.lua:/tmp/probe_spec.lua \
   -e PLUGIN_NAME=acsm \
-  ghcr.io/kaikozlov/koplugin-dev:v2026.03_2 \
+  ghcr.io/kaikozlov/koplugin-dev:v2026.03_4 \
   busted-koreader --verbose --helper=/opt/koplugin-dev/commonrequire.lua \
   /tmp/probe_spec.lua
 ```
@@ -193,7 +198,7 @@ docker run --rm -e SDL_VIDEODRIVER=dummy \
 
 ### Key files
 
-- `justfile` — `setup`, `install-hooks`, `test`, `test-e2e`, `test-all`, `test-filter`, `lint`, `fmt-check`, `fmt`, `build`, `shell`
+- `justfile` — imports `../koplugin-dev/shared.just`; local `build` zip recipe
 - `spec/integration/fixtures/` — test fixtures (sample ACSM, etc.)
 - `adobe/util/adobehash.lua` — extracted hash buffer construction (testable separately from fulfillment)
 

@@ -122,7 +122,8 @@ describe("Fulfillment flow (stubbed network)", function()
             local signingKey = keyWrapper.pkey -- raw RSA key with :sign_raw()
             local userUUID = "urn:uuid:test-user-5678"
 
-            local ok, err = fulfillment.initLicenseService("https://adeactivate.adobe.com/adept", "https://test.example.com/fulfillment", userUUID, signingKey)
+            local ok, err =
+                fulfillment.initLicenseService("https://adeactivate.adobe.com/adept", "https://test.example.com/fulfillment", userUUID, signingKey)
             assert.is.truthy(ok, "initLicenseService failed: " .. tostring(err))
 
             -- Verify the request

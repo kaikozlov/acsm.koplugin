@@ -257,7 +257,8 @@ describe("epub module", function()
         end)
 
         it("should decrypt and decompress (noDecomp=false)", function()
-            local plaintext = "Decompression test: this text will be compressed then encrypted. " .. string.rep("Padding data to ensure enough blocks. ", 20)
+            local plaintext = "Decompression test: this text will be compressed then encrypted. "
+                .. string.rep("Padding data to ensure enough blocks. ", 20)
 
             -- Compress with raw deflate (what Adobe ADEPT uses)
             local deflated = rawDeflate(plaintext)

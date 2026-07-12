@@ -566,14 +566,16 @@ function ACSM:fulfillLoan(acsm_path, acsm_meta)
 
     Trapper:info(_("Downloading book..."), false, true)
     logger.info("[ACSM] fulfillLoan: starting fulfillment.process...")
-    local result, err = fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
+    local result, err =
+        fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
 
     if not result and reused and isActivationError(err) then
         logger.warn("[ACSM] Saved activation failed, retrying with a new activation:", err)
         self:clearActivation()
         activation = self:createActivation()
         Trapper:info(_("Retrying with new activation..."), false, true)
-        result, err = fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
+        result, err =
+            fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
     end
 
     if not result then

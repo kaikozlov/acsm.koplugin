@@ -43,7 +43,9 @@ end
 function pdfcrypt.genkey_v3(bookKey, objid, genno)
     local objidPacked = packLE(bit.bxor(objid, 0x3569ac), 4)
     local gennoPacked = packLE(bit.bxor(genno, 0xca96), 4)
-    local data = bookKey .. string.char(objidPacked:byte(1), gennoPacked:byte(1), objidPacked:byte(2), gennoPacked:byte(2), objidPacked:byte(3)) .. "sAlT"
+    local data = bookKey
+        .. string.char(objidPacked:byte(1), gennoPacked:byte(1), objidPacked:byte(2), gennoPacked:byte(2), objidPacked:byte(3))
+        .. "sAlT"
     local hash = md5(data)
     local keyLen = math.min(#bookKey + 5, 16)
     return hash:sub(1, keyLen)
