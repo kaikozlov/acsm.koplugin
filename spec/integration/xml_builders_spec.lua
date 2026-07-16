@@ -51,12 +51,15 @@ describe("xml.deserialize edge cases", function()
 end)
 
 describe("XML builders", function()
-    local xml, crypto, util
+    local adobe, adobehash, crypto, nativecrypto, util, xml
 
     setup(function()
-        xml = require("adobe.util.xml")
+        adobe = require("adobe.adobe")
+        adobehash = require("adobe.util.adobehash")
         crypto = require("adobe.util.crypto")
+        nativecrypto = require("adobe.util.nativecrypto")
         util = require("adobe.util.util")
+        xml = require("adobe.util.xml")
     end)
 
     describe("xml.adobe", function()
@@ -98,6 +101,69 @@ describe("XML builders", function()
     end)
 
     describe("xml.adobeSigned", function()
+        local function assertWireSignatureMatches(result, key)
+            local signature = assert(result:match("<adept:signature>([^<]+)</adept:signature>"))
+            local digest = assert(adobehash.digest(result))
+            local expected = util.base64.encode(assert(key:sign_raw(digest, nativecrypto.RSA_PKCS1_PADDING)))
+            assert.are.equal(expected, signature)
+        end
+
+        it("signs the exact serialized activation request", function()
+            local key = crypto.key.new().pkey
+            local fingerprint = "activation-fingerprint"
+            local result = xml.adobeSigned("activate", key, {
+                _attr = { requestType = "initial" },
+                fingerprint = fingerprint,
+                deviceType = "standalone",
+                clientOS = adobe.VERSION.os,
+                clientLocale = "en",
+                clientVersion = adobe.VERSION.version,
+                targetDevice = adobe.targetDevice(fingerprint),
+                nonce = "dGVzdC1ub25jZQ==",
+                expiration = "2026-07-16T19:00:00Z",
+                user = "urn:uuid:test-user",
+            })
+
+            assertWireSignatureMatches(result, key)
+        end)
+
+        it("signs the exact serialized request when text is chunked", function()
+            local key = crypto.key.new().pkey
+            local result = xml.adobeSigned("activate", key, {
+                _attr = { requestType = "initial" },
+                data = string.rep("x", 0x7FFF) .. "y",
+            })
+
+            assertWireSignatureMatches(result, key)
+        end)
+
+        it("matches serialized text normalization", function()
+            local key = crypto.key.new().pkey
+            for _, value in ipairs({ "", "   ", "  value  " }) do
+                local result = xml.adobeSigned("activate", key, {
+                    _attr = { requestType = "initial" },
+                    data = value,
+                })
+                assertWireSignatureMatches(result, key)
+            end
+        end)
+
+        it("serializes and signs an attributed text leaf", function()
+            local key = crypto.key.new().pkey
+            local result = xml.adobeSigned("activate", key, {
+                _attr = { requestType = "initial" },
+                data = {
+                    _attr = { lang = "en" },
+                    "hello",
+                },
+            })
+
+            assert.is.truthy(plain(result, '<adept:data lang="en">'))
+            assert.is.truthy(plain(result, "hello"))
+            assert.is_falsy(plain(result, "<adept:1>"))
+            assertWireSignatureMatches(result, key)
+        end)
+
         it("produces XML containing an adept:signature element", function()
             -- crypto.signXML expects raw PKey, not crypto.key wrapper
             local key = crypto.key.new().pkey

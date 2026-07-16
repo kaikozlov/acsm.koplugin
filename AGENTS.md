@@ -239,13 +239,13 @@ Key PDF modules:
 
 ### Test coverage overview
 
-629 tests total (excluding e2e). Key areas:
+633 tests total (excluding e2e). Key areas:
 
 | Area | Spec file | Tests |
 |---|---|---|
 | ASN.1 encoding + signing | `integration/signing_spec.lua` | 37 |
 | Adobe hash buffer + digest | `integration/hashbuffer_spec.lua` | 11 |
-| XML request builders | `integration/xml_builders_spec.lua` | 6 |
+| XML request builders | `integration/xml_builders_spec.lua` | 10 |
 | Crypto round-trips | `integration/crypto_spec.lua` | 5 |
 | DOM parse/serialize round-trip | `integration/dom_spec.lua` | 10 |
 | EPUB decryption pipeline | `integration/epub_spec.lua` | 7 |

@@ -18,7 +18,8 @@ function xml.addNamespace(tb, prefix, namespace)
             if type(v) == "table" then
                 local newv = {}
                 for j, i in pairs(v) do
-                    if j ~= "_attr" then
+                    -- Numeric keys represent text or repeated XML nodes, not tag names.
+                    if j ~= "_attr" and type(j) ~= "number" then
                         j = prefix .. ":" .. j
                     end
                     newv[j] = i

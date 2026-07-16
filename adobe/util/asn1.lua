@@ -38,8 +38,11 @@ function ASN.string(str)
 end
 
 function ASN.text(str)
+    -- Adobe trims XML text nodes before hashing and omits empty nodes.
+    -- Keep the table encoder identical to the serialized-XML hash path.
+    str = str:match("^%s*(.-)%s*$")
     if str == "" then
-        return ASN.byte(ASN.TEXT_NODE) .. ASN.string(str)
+        return ""
     end
 
     local out = ""
