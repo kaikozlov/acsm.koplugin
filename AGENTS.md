@@ -239,11 +239,11 @@ Key PDF modules:
 
 ### Test coverage overview
 
-449 tests total (excluding e2e). Key areas:
+629 tests total (excluding e2e). Key areas:
 
 | Area | Spec file | Tests |
 |---|---|---|
-| ASN.1 encoding + signing | `integration/signing_spec.lua` | 22 (10 byte-level, 3 pipeline, 9 negative) |
+| ASN.1 encoding + signing | `integration/signing_spec.lua` | 37 |
 | Adobe hash buffer + digest | `integration/hashbuffer_spec.lua` | 11 |
 | XML request builders | `integration/xml_builders_spec.lua` | 6 |
 | Crypto round-trips | `integration/crypto_spec.lua` | 5 |
@@ -333,6 +333,5 @@ and cleans up at the end.
 - `REFERENCE/koreader/spec/unit/commonrequire.lua` — the upstream pattern
 - koreader/koreader#15240 — PR that added `deletePluginSettings` to PluginLoader
 - koreader/koreader#15245 — follow-up separating built-in vs user plugins
-
 
 

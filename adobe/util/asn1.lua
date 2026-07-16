@@ -12,6 +12,10 @@ local ASN = {
     END_ELEMENT = 3, -- END_TAG
 }
 
+-- Adobe's XML-signing format chunks text at 0x7FFF bytes. This mirrors
+-- adobe.util.adobehash, which signs serialized fulfillment requests.
+local TEXT_CHUNK_SIZE = 0x7FFF
+
 function ASN.byte(byte)
     return string.char(byte)
 end
@@ -26,10 +30,26 @@ end
 
 function ASN.string(str)
     local length = string.len(str)
+    assert(length <= 0xFFFF, "ASN.1 string length exceeds 65535 bytes")
     return ASN.bytes({
         math.floor(length / 256), -- upper length byte
         bit.band(length, 0xFF), -- lower length byte
     }) .. str -- contents of string
+end
+
+function ASN.text(str)
+    if str == "" then
+        return ASN.byte(ASN.TEXT_NODE) .. ASN.string(str)
+    end
+
+    local out = ""
+    local offset = 1
+    while offset <= #str do
+        local chunk = str:sub(offset, offset + TEXT_CHUNK_SIZE - 1)
+        out = out .. ASN.byte(ASN.TEXT_NODE) .. ASN.string(chunk)
+        offset = offset + #chunk
+    end
+    return out
 end
 
 function ASN.namespacedTag(namespace, name)
@@ -37,7 +57,8 @@ function ASN.namespacedTag(namespace, name)
 end
 
 function ASN.tag(name)
-    -- FIXME: does not work when http: is after the namespace, e.g. for xmlns:http://
+    -- The first capture is greedy, so URI namespaces containing colons split
+    -- on the final colon (for example, "http://ns.adobe.com/adept:activate").
     local ns, tag = string.match(name, "(.+):(.+)")
     -- there was no colon, so we just have a tag
     if ns == nil and tag == nil then
@@ -49,32 +70,47 @@ end
 
 function ASN.attribute(name, value)
     -- don't add xmlns attributes, as namespaces are fully qualified
-    if string.find(name, "xmlns:") then
+    if name == "xmlns" or string.find(name, "^xmlns:") then
         return ""
     end
     return ASN.byte(ASN.ATTRIBUTE) .. ASN.tag(name) .. ASN.string(value)
 end
 
 function ASN.element(name, content)
+    local content_type = type(content)
+    assert(content_type == "string" or content_type == "table", "ASN.1 element content must be a string or table")
+
     local out = ""
     out = out .. ASN.byte(ASN.BEGIN_ELEMENT)
     out = out .. ASN.tag(name)
-    if content._attr ~= nil then
+    if content_type == "table" and content._attr ~= nil then
         for k, v in util.orderedPairs(content._attr) do
             out = out .. ASN.attribute(k, v)
         end
-        content._attr = nil
     end
     out = out .. ASN.byte(ASN.END_ATTRIBUTES)
 
-    -- FIXME: how does it work if we have attributes, but are a text node?
-    if type(content) == "string" then
-        -- FIXME: support greater than 32k (chunking)
-        out = out .. ASN.byte(ASN.TEXT_NODE)
-        out = out .. ASN.string(content)
-    elseif type(content) == "table" then
-        -- FIXME: is this the right way to sort elements?
-        for k, v in util.orderedPairs(content) do
+    if content_type == "string" then
+        out = out .. ASN.text(content)
+    else
+        -- xml2lua represents a leaf with attributes and text as
+        -- { _attr = { ... }, "text" }.
+        local text = content[1]
+        local children = {}
+        for k, v in pairs(content) do
+            if k ~= "_attr" and type(k) ~= "number" then
+                children[k] = v
+            end
+        end
+
+        if text ~= nil then
+            assert(#content == 1 and next(children) == nil, "ASN.1 mixed content is not supported")
+            out = out .. ASN.text(tostring(text))
+        end
+
+        -- xml2lua.toXml uses the same orderedPairs implementation, so this
+        -- order matches the XML sent to Adobe and therefore its signed form.
+        for k, v in util.orderedPairs(children) do
             out = out .. ASN.element(k, v)
         end
     end

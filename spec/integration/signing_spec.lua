@@ -20,6 +20,12 @@ describe("ASN.1 encoding (asn1.element)", function()
             assert.are.equal("\x00\x00", asn1.string(""))
         end)
 
+        it("ASN.string rejects values that cannot fit in its two-byte length", function()
+            assert.has.errors(function()
+                asn1.string(string.rep("x", 0x10000))
+            end)
+        end)
+
         it("ASN.tag splits namespace:name correctly", function()
             local result = asn1.tag("adept:signIn")
             -- namespace "adept" (length 5) + name "signIn" (length 7)
@@ -33,6 +39,7 @@ describe("ASN.1 encoding (asn1.element)", function()
 
         it("ASN.attribute skips xmlns: attributes entirely", function()
             assert.are.equal("", asn1.attribute("xmlns:foo", "http://example.com"))
+            assert.are.equal("", asn1.attribute("xmlns", "http://example.com"))
         end)
 
         it("ASN.attribute encodes non-xmlns attribute", function()
@@ -61,7 +68,6 @@ describe("ASN.1 encoding (asn1.element)", function()
         end)
 
         it("encodes an element with attributes", function()
-            -- Use a fresh table since asn1.element mutates _attr
             local result = asn1.element("root", {
                 _attr = { method = "bar" },
             })
@@ -74,6 +80,35 @@ describe("ASN.1 encoding (asn1.element)", function()
                 .. "\x00\x03bar" -- attr value "bar"
                 .. "\x02" -- END_ATTRIBUTES
                 .. "\x03" -- END_ELEMENT (empty body)
+            assert.are.equal(expected, result)
+        end)
+
+        it("encodes a text leaf with attributes", function()
+            local result = asn1.element("root", {
+                _attr = { lang = "en" },
+                "hello",
+            })
+            local expected = "\x01" -- BEGIN_ELEMENT
+                .. "\x00\x00\x00\x04root"
+                .. "\x05" -- ATTRIBUTE
+                .. "\x00\x00\x00\x04lang"
+                .. "\x00\x02en"
+                .. "\x02" -- END_ATTRIBUTES
+                .. "\x04\x00\x05hello" -- TEXT_NODE
+                .. "\x03" -- END_ELEMENT
+            assert.are.equal(expected, result)
+        end)
+
+        it("does not mutate the input attributes", function()
+            local content = { _attr = { method = "bar" }, child = "text" }
+            asn1.element("root", content)
+            assert.are.same({ method = "bar" }, content._attr)
+        end)
+
+        it("chunks text longer than 0x7FFF bytes", function()
+            local first = string.rep("x", 0x7FFF)
+            local result = asn1.element("root", first .. "y")
+            local expected = "\x01\x00\x00\x00\x04root\x02" .. "\x04\x7F\xFF" .. first .. "\x04\x00\x01y" .. "\x03"
             assert.are.equal(expected, result)
         end)
 
@@ -170,6 +205,57 @@ describe("ASN.1 encoding (asn1.element)", function()
     end)
 end)
 
+describe("ASN.1 table encoder conformance", function()
+    local ADEPT = "http://ns.adobe.com/adept"
+    local adobehash, asn1, dom, util, xml
+
+    setup(function()
+        adobehash = require("adobe.util.adobehash")
+        asn1 = require("adobe.util.asn1")
+        dom = require("adobe.util.dom")
+        util = require("adobe.util.util")
+        xml = require("adobe.util.xml")
+    end)
+
+    local function encodeSerialized(xml_string)
+        local document = dom.parse(xml_string)
+        local root = dom.firstElementChild(document)
+        local buf = {}
+        adobehash.buildHashBuffer(root, {}, buf)
+        return table.concat(buf)
+    end
+
+    local function compareTableAndSerialized(payload)
+        local signing_payload = xml.addNamespace(util.deepTableCopy(payload), ADEPT, ADEPT)
+        local table_encoded = asn1.element(ADEPT .. ":activate", signing_payload)
+
+        local wire_payload = xml.addNamespace(util.deepTableCopy(payload), "adept", ADEPT)
+        local serialized = xml.serialize(wire_payload, "adept:activate")
+        assert.are.equal(encodeSerialized(serialized), table_encoded)
+    end
+
+    it("matches the DOM encoder for an activation-shaped request", function()
+        compareTableAndSerialized({
+            _attr = { requestType = "initial" },
+            user = "urn:uuid:test-user",
+            fingerprint = "abc123",
+            deviceType = "standalone",
+            targetDevice = {
+                clientLocale = "en",
+                clientOS = "Linux",
+                deviceType = "standalone",
+            },
+        })
+    end)
+
+    it("matches the DOM encoder when long text requires chunking", function()
+        compareTableAndSerialized({
+            _attr = { requestType = "initial" },
+            data = string.rep("x", 0x7FFF) .. "y",
+        })
+    end)
+end)
+
 describe("asn1.element negative cases", function()
     local asn1
 
@@ -249,7 +335,6 @@ describe("crypto.signXML", function()
 
     it("produces a deterministic base64 signature for same key + input", function()
         local key = makeKey()
-        -- Use fresh tables since asn1.element mutates _attr
         local function makeTb()
             return { _attr = { method = "bar" }, child = "hello" }
         end
