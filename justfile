@@ -69,7 +69,7 @@ build:
     mkdir -p build
     tmpdir="$(mktemp -d)"
     mkdir "$tmpdir/acsm.koplugin"
-    cp -r adobe dependencies *.lua LICENSE README.md "$tmpdir/acsm.koplugin/"
+    cp -r adobe dependencies patches *.lua LICENSE README.md "$tmpdir/acsm.koplugin/"
     (cd "$tmpdir" && zip -rq - .) > "build/acsm-koplugin-${version}.zip"
     rm -rf "$tmpdir"
     echo "Built: build/acsm-koplugin-${version}.zip"

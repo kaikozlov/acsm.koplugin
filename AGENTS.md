@@ -239,7 +239,7 @@ Key PDF modules:
 
 ### Test coverage overview
 
-633 tests total (excluding e2e). Key areas:
+635 tests total (excluding e2e). Key areas:
 
 | Area | Spec file | Tests |
 |---|---|---|

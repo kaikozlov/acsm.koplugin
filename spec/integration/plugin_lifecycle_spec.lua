@@ -146,6 +146,14 @@ describe("ACSM plugin lifecycle", function()
                 assert.is.truthy(menu_items.acsm.sub_item_table_func)
                 local sub_items = menu_items.acsm.sub_item_table_func()
                 assert.is_true(#sub_items >= 3, "Expected at least 3 sub-menu items")
+                local reuse_item
+                for _, item in ipairs(sub_items) do
+                    if item.text == "Reuse existing file" then
+                        reuse_item = item
+                        break
+                    end
+                end
+                assert.is.truthy(reuse_item, "Expected format-neutral reuse setting")
             end
 
             fm:onClose()

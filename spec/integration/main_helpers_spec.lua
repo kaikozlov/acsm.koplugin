@@ -809,6 +809,50 @@ describe("main.lua helpers & orchestration", function()
     -- openFile
     -- ================================================================
     describe("openFile", function()
+        for _, case in ipairs({
+            { extension = "epub", label = "EPUB" },
+            { extension = "pdf", label = "PDF" },
+        }) do
+            it("logs " .. case.label .. " when reusing an existing file", function()
+                local main, tmp = loadInTmpDir("openfile-reuse-" .. case.extension)
+                local output_path = tmp .. "/book." .. case.extension
+                assert(koutil.writeToFile("book", output_path))
+
+                main.parseAcsmMetadata = function()
+                    return { resourceId = "urn:uuid:reused-book" }
+                end
+                main.lookupFulfillmentMapping = function()
+                    return output_path
+                end
+
+                local opened_path
+                main.openGeneratedBook = function(_, path)
+                    opened_path = path
+                end
+
+                local logger = require("logger")
+                local original_info = logger.info
+                local reuse_message, logged_path
+                logger.info = function(message, path)
+                    if type(message) == "string" and message:find("[ACSM] Reusing existing", 1, true) then
+                        reuse_message = message
+                        logged_path = path
+                    end
+                end
+
+                local ok, err = pcall(function()
+                    main:openFile(tmp .. "/loan.acsm")
+                end)
+                logger.info = original_info
+
+                assert.is_true(ok, tostring(err))
+                assert.are.equal("[ACSM] Reusing existing " .. case.label .. ":", reuse_message)
+                assert.are.equal(output_path, logged_path)
+                assert.are.equal(output_path, opened_path)
+                rmTmpDir(tmp)
+            end)
+        end
+
         it("is a no-op for non-acsm files", function()
             local main, tmp = loadInTmpDir("openfile-noacsm")
             main:loadSettings()

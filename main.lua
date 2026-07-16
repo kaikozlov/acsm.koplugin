@@ -112,7 +112,7 @@ function ACSM:getSubMenuItems()
             end,
         },
         {
-            text = _("Reuse existing EPUB"),
+            text = _("Reuse existing file"),
             checked_func = function()
                 return self.reuse_existing
             end,
@@ -327,7 +327,7 @@ end
 
 --- Parse metadata from an ACSM file.
 -- Extracts dc:title and resource UUID directly from the ACSM XML —
--- no need to download the EPUB first.
+-- no need to download the fulfilled book first.
 -- @string acsm_path path to the ACSM file
 -- @treturn table{ title, creator, identifier, publisher, language, subject, description, resourceId, format } or nil on failure
 function ACSM:parseAcsmMetadata(acsm_path)
@@ -425,7 +425,7 @@ function ACSM:getFulfillmentMap()
     return self._fulfillment_map
 end
 
---- Look up a previously fulfilled EPUB by resource ID.
+--- Look up a previously fulfilled book by resource ID.
 -- @string resource_id the ACSM resource UUID (e.g. "urn:uuid:...")
 -- @treturn string output path, or nil
 function ACSM:lookupFulfillmentMapping(resource_id)
@@ -434,7 +434,7 @@ end
 
 --- Store a resource_id → output_path mapping after fulfillment.
 -- @string resource_id the ACSM resource UUID
--- @string output_path where the EPUB was saved
+-- @string output_path where the fulfilled book was saved
 function ACSM:saveFulfillmentMapping(resource_id, output_path)
     local map = self:getFulfillmentMap()
 
@@ -559,7 +559,7 @@ function ACSM:fulfillLoan(acsm_path, acsm_meta)
     logger.info("[ACSM] fulfillLoan: acsm_path=", acsm_path)
     local activation, reused = self:getActivation(false)
 
-    -- Title-based output path derived from ACSM metadata (not EPUB)
+    -- Title-based output path derived from ACSM metadata (not the downloaded book)
     local desired_path = self:deriveOutputPath(acsm_path, acsm_meta)
     local output_path = self:findUniquePath(desired_path)
     logger.info("[ACSM] fulfillLoan: output_path=", output_path)
@@ -604,7 +604,8 @@ function ACSM:openFile(file)
     if self.reuse_existing and acsm_meta and acsm_meta.resourceId then
         local existing_path = self:lookupFulfillmentMapping(acsm_meta.resourceId)
         if existing_path and util.pathExists(existing_path) then
-            logger.info("[ACSM] Reusing existing EPUB:", existing_path)
+            local format_label = existing_path:lower():match("%.pdf$") and "PDF" or "EPUB"
+            logger.info("[ACSM] Reusing existing " .. format_label .. ":", existing_path)
             self:openGeneratedBook(existing_path)
             return
         end

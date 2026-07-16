@@ -1,6 +1,6 @@
 ## ACSM for KOReader
 
-A KOReader plugin that lets you borrow ebooks from your public library and read them on your e-reader — no computer or Adobe Digital Editions required. Open an `.acsm` loan file directly on-device and get a standard EPUB you can keep in your library.
+A KOReader plugin that lets you borrow ebooks from your public library and read them on your e-reader — no computer or Adobe Digital Editions required. Open an `.acsm` loan file directly on-device and get a standard EPUB or PDF you can keep in your library.
 
 ### Installation
 
@@ -11,7 +11,7 @@ A KOReader plugin that lets you borrow ebooks from your public library and read 
 
 ### Usage
 
-1. Borrow an ebook from your library and download the `.acsm` file. In Libby: **Shelf → Manage Loan → Read With... → Other Options → EPUB**
+1. Borrow an ebook from your library and download the `.acsm` file. In Libby: **Shelf → Manage Loan → Read With... → Other Options → EPUB** (or PDF, when offered).
 
    > **Tip:** On Kindle, you can do this entirely on-device — open the Kindle's built-in web browser, go to [libbyapp.com](https://libbyapp.com), borrow a book, and download the `.acsm` file directly.
 
@@ -21,14 +21,14 @@ A KOReader plugin that lets you borrow ebooks from your public library and read 
 
 The first time you open a loan, the plugin creates a one-time anonymous device activation with Adobe. This is saved and reused for all future loans — no Adobe account needed.
 
-The resulting EPUB is saved next to the original `.acsm` file. It's a standard `.epub` that works like any other book in your KOReader library. Opening the same `.acsm` again will reuse the existing EPUB without re-downloading.
+The resulting EPUB or PDF is saved next to the original `.acsm` file and works like any other book in your KOReader library. Opening the same `.acsm` again will reuse the existing file without re-downloading.
 
 ### Settings
 
 | Setting | Description |
 | ------- | ----------- |
 | Activation status | Whether the plugin has an active Adobe device registration |
-| Reuse existing EPUB | Open previously downloaded EPUB instead of re-fetching (on by default) |
+| Reuse existing file | Open the previously downloaded EPUB or PDF instead of re-fetching (on by default) |
 | Forget Adobe activation | Clear the saved activation to start fresh |
 
 ### Compatibility

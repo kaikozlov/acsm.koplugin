@@ -113,6 +113,8 @@ jobs:
                   set -euo pipefail
                   test -f "$ZIP"
                   unzip -l "$ZIP" | grep -q 'acsm.koplugin/_meta.lua'
+                  unzip -l "$ZIP" | grep -q 'acsm.koplugin/patches/README.md'
+                  unzip -l "$ZIP" | grep -q 'acsm.koplugin/patches/2-acsm-open-via-filemanager.lua'
                   if unzip -l "$ZIP" | grep -q 'acsm.koplugin/spec/'; then
                     echo "Release artifact unexpectedly contains spec/" >&2
                     exit 1
