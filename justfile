@@ -5,6 +5,7 @@
 #
 # Quick start:
 #   just setup     # install git hooks and pull the image (one-time)
+#   just verify    # read-only formatting, lint, and all non-e2e tests
 #   just test      # run all tests (quiet; V=1 for verbose)
 #   just build     # build a release zip (versioned from _meta.lua)
 #   just shell     # drop into the container
@@ -13,7 +14,7 @@
 #   just sync-shared   # refresh just/shared.just (then commit)
 
 plugin_name := "acsm"
-koplugin_dev_version := "v2026.03_6"
+koplugin_dev_version := "v2026.03_7"
 # Git ref used by `just sync-shared` (recipe source). Independent of the image pin.
 koplugin_dev_ref := env("KOPLUGIN_DEV_REF", "main")
 plugin_path := "/opt/plugin"
@@ -27,6 +28,18 @@ exclude_tags := "e2e"
 version := `sed -n 's/.*version *= *"\([^"]*\)".*/\1/p' _meta.lua`
 
 import "./just/shared.just"
+
+# =============================================================================
+# Canonical verification
+# =============================================================================
+
+# Read-only static checks suitable for pre-commit.
+[group('lint')]
+verify-static: fmt-check lint
+
+# Definitive local/CI verification. Networked e2e tests remain explicit.
+[group('test')]
+verify: verify-static test
 
 # =============================================================================
 # Setup (plugin-local)

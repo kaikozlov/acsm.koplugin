@@ -15,6 +15,10 @@ on:
 permissions:
     contents: write
 
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: false
+
 jobs:
     release:
         name: Build and publish release
@@ -26,6 +30,7 @@ jobs:
               uses: actions/checkout@v7
               with:
                   fetch-depth: 0
+                  persist-credentials: false
 
             - name: Determine plugin version
               id: version
@@ -83,25 +88,15 @@ jobs:
                   exit 1
 
             - name: Install just
-              run: |
-                  set -euo pipefail
-                  mkdir -p "$HOME/.local/bin"
-                  curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
-                    | bash -s -- --to "$HOME/.local/bin"
-                  echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-                  "$HOME/.local/bin/just" --version
+              uses: extractions/setup-just@v3
+              with:
+                  just-version: 1.57.0
 
-            - name: Set up development image
-              run: just setup
+            - name: Pull development image
+              run: just pull-image
 
-            - name: Check Lua formatting
-              run: just fmt-check
-
-            - name: Run luacheck
-              run: just lint
-
-            - name: Run tests
-              run: just test
+            - name: Verify
+              run: just verify
 
             - name: Build release zip
               run: just build
@@ -112,10 +107,12 @@ jobs:
               run: |
                   set -euo pipefail
                   test -f "$ZIP"
-                  unzip -l "$ZIP" | grep -q 'acsm.koplugin/_meta.lua'
-                  unzip -l "$ZIP" | grep -q 'acsm.koplugin/patches/README.md'
-                  unzip -l "$ZIP" | grep -q 'acsm.koplugin/patches/2-acsm-open-via-filemanager.lua'
-                  if unzip -l "$ZIP" | grep -q 'acsm.koplugin/spec/'; then
+                  unzip -tq "$ZIP"
+                  entries="$(unzip -Z1 "$ZIP")"
+                  grep -Fxq 'acsm.koplugin/_meta.lua' <<< "$entries"
+                  grep -Fxq 'acsm.koplugin/patches/README.md' <<< "$entries"
+                  grep -Fxq 'acsm.koplugin/patches/2-acsm-open-via-filemanager.lua' <<< "$entries"
+                  if grep -Fq 'acsm.koplugin/spec/' <<< "$entries"; then
                     echo "Release artifact unexpectedly contains spec/" >&2
                     exit 1
                   fi

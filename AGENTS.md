@@ -34,6 +34,8 @@ code paths as the plugin on a real device.
 
 ```bash
 just setup                 # install git hooks and pull the koplugin-dev image (one-time)
+just verify                # read-only fmt + lint + all non-e2e tests (pre-push/CI)
+just verify-static         # read-only fmt + lint checks (pre-commit)
 just test                  # run all tests (quiet; excludes e2e)
 V=1 just test              # same, with full busted --verbose output
 just test-e2e              # run e2e tests (hits real Adobe servers)
@@ -44,7 +46,7 @@ just shell                 # drop into bash inside the container
 just lint                  # run luacheck inside the container
 just fmt-check             # check Lua formatting with stylua
 just fmt                   # format Lua code with stylua
-just check                 # fmt + lint + test in one container (pre-commit)
+just check                 # mutating fmt + lint + test pass in one container
 ```
 
 Shared recipes are vendored at `just/shared.just` (from koplugin-dev). Refresh with
@@ -90,7 +92,7 @@ fail with a network or HTTP error.
 
 ### How it works
 
-- **Image**: `ghcr.io/kaikozlov/koplugin-dev:v2026.03_6` — unified dev image
+- **Image**: `ghcr.io/kaikozlov/koplugin-dev:v2026.03_7` — unified dev image
   with KOReader + busted + luacheck + stylua.
 - **KOReader**: extracted to `/opt/lib/koreader/`, includes bundled `luajit`.
 - **Plugin**: bind-mounted at `/opt/plugin`, auto-symlinked into KOReader's
@@ -189,7 +191,7 @@ docker run --rm -e SDL_VIDEODRIVER=dummy \
   -v "$PWD:/opt/plugin" \
   -v /tmp/probe_spec.lua:/tmp/probe_spec.lua \
   -e PLUGIN_NAME=acsm \
-  ghcr.io/kaikozlov/koplugin-dev:v2026.03_6 \
+  ghcr.io/kaikozlov/koplugin-dev:v2026.03_7 \
   busted-koreader --verbose --helper=/opt/koplugin-dev/commonrequire.lua \
   /tmp/probe_spec.lua
 ```
