@@ -24,8 +24,9 @@ has_go := "0"
 go_integration_packages := ""
 exclude_tags := "e2e"
 
-# Version is read from _meta.lua so there is a single source of truth.
-version := `sed -n 's/.*version *= *"\([^"]*\)".*/\1/p' _meta.lua`
+# Version is read from _meta.lua so there is a single source of truth. Anchor
+# the path to this justfile because container re-entry keeps KOReader's workdir.
+version := shell("awk -F'\"' '/version *=/{print $2; exit}' \"$1\"", justfile_directory() + "/_meta.lua")
 
 import "./just/shared.just"
 
@@ -35,11 +36,19 @@ import "./just/shared.just"
 
 # Read-only static checks suitable for pre-commit.
 [group('lint')]
-verify-static: fmt-check lint
+verify-static:
+    {{ _run }} {{ _reenter }} _verify_static
+
+[private]
+_verify_static: fmt-check lint
 
 # Definitive local/CI verification. Networked e2e tests remain explicit.
 [group('test')]
-verify: verify-static test
+verify:
+    {{ _run }} {{ _reenter }} _verify
+
+[private]
+_verify: _verify_static test
 
 # =============================================================================
 # Setup (plugin-local)
