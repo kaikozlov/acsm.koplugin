@@ -4,6 +4,21 @@ local nativecrypto = require("adobe.util.nativecrypto")
 local zlib = require("adobe.util.zlib")
 
 describe("epub module", function()
+    describe("temporary work directories", function()
+        it("creates a unique directory for each decryption", function()
+            local lfs = require("libs/libkoreader-lfs")
+            local first = assert(epub._makeTempDir())
+            local second = assert(epub._makeTempDir())
+
+            assert.are_not.equal(first, second)
+            assert.are.equal("directory", lfs.attributes(first, "mode"))
+            assert.are.equal("directory", lfs.attributes(second, "mode"))
+
+            epub._removeTree(first)
+            epub._removeTree(second)
+        end)
+    end)
+
     -- ---------------------------------------------------------------
     -- stripPkcs7Held (operates on FFI buffer)
     -- ---------------------------------------------------------------
@@ -41,6 +56,13 @@ describe("epub module", function()
 
         it("should reject padding > 16", function()
             local buf, len = makeBuf("hello" .. string.char(17))
+            local result, err = epub._stripPkcs7Held(buf, len)
+            assert.is_nil(result)
+            assert.is.truthy(err:find("PKCS"))
+        end)
+
+        it("should reject inconsistent padding bytes", function()
+            local buf, len = makeBuf("payload" .. string.char(0x99, 0x02))
             local result, err = epub._stripPkcs7Held(buf, len)
             assert.is_nil(result)
             assert.is.truthy(err:find("PKCS"))

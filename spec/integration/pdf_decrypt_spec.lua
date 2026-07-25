@@ -284,6 +284,17 @@ describe("PDF decryption helpers", function()
             assert.are.equal(shortData, decipher(1, 0, shortData))
         end)
 
+        it("does not accept inconsistent PKCS7 padding bytes", function()
+            local bookKey = string.rep(string.char(0xEF), 16)
+            local iv = string.rep(string.char(0), 16)
+            local malformed = string.rep("A", 14) .. string.char(0x99, 0x02)
+            local encrypted = nc.aes_cbc_encrypt(bookKey, iv, malformed, true)
+            local ciphertext = iv .. encrypted
+
+            local decipher = pdf._make_aes_decipher(bookKey, genkey_identity)
+            assert.are.equal(ciphertext, decipher(1, 0, ciphertext))
+        end)
+
         it("handles exact block-size plaintext (full padding block)", function()
             local bookKey = string.rep(string.char(0xEE), 16)
             -- 16 bytes exactly → PKCS7 adds a full 16-byte padding block

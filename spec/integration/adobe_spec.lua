@@ -130,6 +130,39 @@ describe("adobe", function()
             assert.is.truthy(err:find("incomplete"), "Error should mention incomplete: " .. err)
         end)
 
+        it("returns nil + error for a corrupt private key", function()
+            local serialized = {
+                deviceKey = util.base64.encode(string.rep("\0", 16)),
+                privateLicenseKey = util.base64.encode("not valid private DER"),
+                user = "urn:uuid:user",
+                pkcs12 = "present",
+                deviceUUID = "urn:uuid:device",
+                fingerprint = "present",
+            }
+
+            local restored, err = adobe.restoreActivation(serialized)
+            assert.is_nil(restored)
+            assert.is_truthy(err)
+            assert.is_truthy(err:find("d2i_AutoPrivateKey failed", 1, true))
+        end)
+
+        it("returns nil + error for a corrupt device key", function()
+            local licenseKey = crypto.key.new()
+            local serialized = {
+                deviceKey = "not valid base64",
+                privateLicenseKey = util.base64.encode(licenseKey:topkcs8()),
+                user = "urn:uuid:user",
+                pkcs12 = "present",
+                deviceUUID = "urn:uuid:device",
+                fingerprint = "present",
+            }
+
+            local restored, err = adobe.restoreActivation(serialized)
+            assert.is_nil(restored)
+            assert.is_truthy(err)
+            assert.is_truthy(err:find("device key", 1, true))
+        end)
+
         it("restores activationURL from serialized data", function()
             local deviceKey = crypto.deviceKey.new()
             local licenseKey = crypto.key.new()

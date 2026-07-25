@@ -346,8 +346,8 @@ describe("crypto.signXML", function()
 
         -- Should be valid base64
         local decoded = util.base64.decode(sig1)
-        -- 1025-bit RSA key produces 129-byte signatures
-        assert.are.equal(129, #decoded)
+        -- 1024-bit RSA key produces 128-byte signatures
+        assert.are.equal(128, #decoded)
     end)
 
     it("matches manual ASN.1 → SHA-1 → RSA sign pipeline", function()

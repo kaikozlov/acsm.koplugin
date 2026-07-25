@@ -55,6 +55,14 @@ describe("RC4 cipher", function()
         assert.equals(data, decrypted)
     end)
 
+    it("should handle large binary buffers", function()
+        local key = "LargeBufferKey"
+        local data = string.rep("\0\1\2\3\254\255", 65536)
+        local encrypted = rc4.crypt(rc4.init(key), data)
+        assert.equals(#data, #encrypted)
+        assert.equals(data, rc4.crypt(rc4.init(key), encrypted))
+    end)
+
     it("should handle single-byte key", function()
         local key = "\x00"
         local data = "\x00\x00\x00\x00"

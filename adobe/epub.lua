@@ -99,6 +99,11 @@ local function stripPkcs7Held(buf, len)
     if not pad or pad < 1 or pad > 16 or pad > len then
         return nil, "Invalid PKCS#7 padding"
     end
+    for i = len - pad, len - 1 do
+        if tonumber(buf[i]) ~= pad then
+            return nil, "Invalid PKCS#7 padding"
+        end
+    end
     return len - pad
 end
 
@@ -304,18 +309,31 @@ end
 local function makeTempDir()
     local cacheDir = DataStorage:getDataDir() .. "/cache/acsm.koplugin"
     if lfs.attributes(cacheDir, "mode") ~= "directory" then
-        lfs.mkdir(cacheDir)
+        local ok, err = lfs.mkdir(cacheDir)
+        if not ok and lfs.attributes(cacheDir, "mode") ~= "directory" then
+            return nil, "Failed to create cache dir: " .. cacheDir .. ": " .. tostring(err)
+        end
     end
-    local tmpDir = cacheDir .. "/epub_work"
-    -- Clean up any previous run
-    if lfs.attributes(tmpDir, "mode") == "directory" then
-        removeTree(tmpDir)
+
+    -- Remove the fixed directory used by older versions. New work directories
+    -- are unique so overlapping external-open jobs cannot delete each other's data.
+    local legacyDir = cacheDir .. "/epub_work"
+    if lfs.attributes(legacyDir, "mode") == "directory" then
+        removeTree(legacyDir)
     end
-    local ok, err = lfs.mkdir(tmpDir)
-    if not ok and lfs.attributes(tmpDir, "mode") ~= "directory" then
-        return nil, "Failed to create temp dir: " .. tmpDir .. ": " .. err
+
+    local timestamp = tostring(os.time())
+    local random = tostring(math.random(100000, 999999))
+    local lastErr
+    for i = 1, 999 do
+        local tmpDir = cacheDir .. "/epub-work-" .. timestamp .. "-" .. random .. "-" .. tostring(i)
+        local ok, err = lfs.mkdir(tmpDir)
+        if ok then
+            return tmpDir
+        end
+        lastErr = err
     end
-    return tmpDir
+    return nil, "Failed to create unique EPUB temp dir: " .. tostring(lastErr)
 end
 
 local function ensureDir(path)
@@ -493,7 +511,10 @@ end
 
 function epub.decryptAdobeEpub(inputPath, outputPath, bookKey)
     logger.info("[ACSM] decryptAdobeEpub: input=", inputPath, "output=", outputPath)
-    local workDir = makeTempDir()
+    local workDir, workErr = makeTempDir()
+    if not workDir then
+        return nil, workErr
+    end
     logger.info("[ACSM] decryptAdobeEpub: workDir=", workDir)
     local ok, err = extractEpub(inputPath, workDir)
     if not ok then
@@ -581,6 +602,8 @@ end
 
 -- Export internal functions for testing (underscore-prefixed = internal API)
 epub._parseEncryptionXml = parseEncryptionXml
+epub._makeTempDir = makeTempDir
+epub._removeTree = removeTree
 epub._stripPkcs7Held = stripPkcs7Held
 epub._stripAdeptWatermarksFromText = stripAdeptWatermarksFromText
 epub._decryptAdeptEntryFile = decryptAdeptEntryFile

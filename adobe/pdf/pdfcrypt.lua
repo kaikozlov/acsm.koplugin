@@ -19,6 +19,19 @@ local function sha256_bin(data)
     return sha2.hex2bin(sha2.sha256(data))
 end
 
+local function unpadPkcs7(data)
+    local padLen = #data > 0 and data:byte(#data) or nil
+    if not padLen or padLen < 1 or padLen > 16 or padLen > #data then
+        return nil, "Invalid PKCS#7 padding"
+    end
+    for i = #data - padLen + 1, #data do
+        if data:byte(i) ~= padLen then
+            return nil, "Invalid PKCS#7 padding"
+        end
+    end
+    return data:sub(1, #data - padLen)
+end
+
 --- Pack an integer as little-endian, returning only the first N bytes.
 local function packLE(value, nbytes)
     local buf = ffi.new("uint8_t[4]")
@@ -155,18 +168,11 @@ function pdfcrypt.removeHardening(bookKey, keyType, resourceUUID, deviceUUID, fu
 
     -- AES-CBC decrypt (matches Python: AES.new(kek, AES.MODE_CBC, kekiv).decrypt(keydata))
     -- no_padding=true because we handle PKCS7 unpad ourselves (matching Python's unpad())
-    local decrypted = aesDecrypt(kek, iv, bookKey, true)
+    local decrypted, decryptErr = aesDecrypt(kek, iv, bookKey, true)
     if not decrypted then
-        return nil
+        return nil, decryptErr
     end
-    -- Remove PKCS7 padding (Python unpad from ineptpdf.py)
-    if #decrypted > 0 then
-        local padLen = decrypted:byte(#decrypted)
-        if padLen > 0 and padLen <= 16 then
-            decrypted = decrypted:sub(1, #decrypted - padLen)
-        end
-    end
-    return decrypted
+    return unpadPkcs7(decrypted)
 end
 
 return pdfcrypt

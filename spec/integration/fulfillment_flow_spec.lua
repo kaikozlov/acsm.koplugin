@@ -115,6 +115,24 @@ describe("Fulfillment flow (stubbed network)", function()
             assert.is.truthy(err:find("Operator auth failed"))
         end)
 
+        it("operatorAuth rejects empty, malformed, and unexpected responses", function()
+            local http = require("socket.http")
+            for _, body in ipairs({ "", "<success>", '<?xml version="1.0"?><unexpected/>' }) do
+                http.request = function(req)
+                    if req.sink then
+                        req.sink(body)
+                        req.sink(nil)
+                    end
+                    return 1, 200, {}
+                end
+
+                local ok, err = fulfillment.operatorAuth("https://test.example.com/fulfillment", "urn:uuid:test-user", "cert", "lcert", "acert")
+                assert.is_nil(ok)
+                assert.is_truthy(err)
+                assert.is_truthy(err:find("Operator auth failed", 1, true))
+            end
+        end)
+
         it("initLicenseService sends signed request", function()
             -- fulfillment functions expect a raw nativecrypto RSA key
             -- (as returned by crypto.decodepkcs12), not the crypto.key wrapper
@@ -130,6 +148,30 @@ describe("Fulfillment flow (stubbed network)", function()
             assert.are.equal(1, #captured_requests)
             local req = captured_requests[1]
             assert.is.truthy(req.url:find("/InitLicenseService$"))
+        end)
+
+        it("initLicenseService rejects empty, malformed, and unexpected responses", function()
+            local http = require("socket.http")
+            local signingKey = crypto.key.new().pkey
+            for _, body in ipairs({ "", "<success>", '<?xml version="1.0"?><unexpected/>' }) do
+                http.request = function(req)
+                    if req.sink then
+                        req.sink(body)
+                        req.sink(nil)
+                    end
+                    return 1, 200, {}
+                end
+
+                local ok, err = fulfillment.initLicenseService(
+                    "https://adeactivate.adobe.com/adept",
+                    "https://test.example.com/fulfillment",
+                    "urn:uuid:test-user",
+                    signingKey
+                )
+                assert.is_nil(ok)
+                assert.is_truthy(err)
+                assert.is_truthy(err:find("InitLicenseService", 1, true))
+            end
         end)
     end)
 

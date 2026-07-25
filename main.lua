@@ -506,14 +506,25 @@ end
 function ACSM:createActivation()
     Trapper:info(_("Creating Adobe activation..."), false, true)
     logger.info("[ACSM] createActivation: fetching authentication service info...")
-    local auth_info = adobe.getAuthenticationServiceInfo()
+    local auth_info, authErr = adobe.getAuthenticationServiceInfo()
+    if not auth_info then
+        return nil, authErr
+    end
+
     logger.info("[ACSM] createActivation: got auth service info, signing in anonymously...")
-    local creds = adobe.signIn("anonymous", "", "", auth_info.certificate)
+    local creds, signInErr = adobe.signIn("anonymous", "", "", auth_info.certificate)
+    if not creds then
+        return nil, signInErr
+    end
     logger.info("[ACSM] createActivation: sign-in successful, user=", creds.user)
 
     Trapper:info(_("Registering device..."), false, true)
     logger.info("[ACSM] createActivation: sending device activation request...")
-    local device_uuid, fingerprint = adobe.activate(creds.user, creds.deviceKey, creds.pkcs12)
+    local device_uuid, fingerprintOrErr = adobe.activate(creds.user, creds.deviceKey, creds.pkcs12)
+    if not device_uuid then
+        return nil, fingerprintOrErr
+    end
+    local fingerprint = fingerprintOrErr
     logger.info("[ACSM] createActivation: device activated, uuid=", device_uuid)
     local activation = {
         creds = creds,
@@ -523,7 +534,11 @@ function ACSM:createActivation()
     }
 
     logger.info("[ACSM] createActivation: serializing and saving activation...")
-    self.activation_blob = adobe.serializeActivation(creds, device_uuid, fingerprint, auth_info.certificate, creds.activationURL)
+    local serialized, serializeErr = adobe.serializeActivation(creds, device_uuid, fingerprint, auth_info.certificate, creds.activationURL)
+    if not serialized then
+        return nil, serializeErr
+    end
+    self.activation_blob = serialized
     self:saveSettings()
     logger.info("[ACSM] createActivation: complete")
 
@@ -540,7 +555,8 @@ function ACSM:getActivation(force_new)
         end
     end
     logger.info("[ACSM] getActivation: creating new activation")
-    return self:createActivation(), false
+    local created, err = self:createActivation()
+    return created, false, err
 end
 
 function ACSM:openGeneratedBook(path)
@@ -557,7 +573,11 @@ end
 
 function ACSM:fulfillLoan(acsm_path, acsm_meta)
     logger.info("[ACSM] fulfillLoan: acsm_path=", acsm_path)
-    local activation, reused = self:getActivation(false)
+    local activation, reused, activationErr = self:getActivation(false)
+    if not activation then
+        -- Also accept the older two-value error shape from stubs/extensions.
+        return nil, activationErr or reused or "Could not create Adobe activation"
+    end
 
     -- Title-based output path derived from ACSM metadata (not the downloaded book)
     local desired_path = self:deriveOutputPath(acsm_path, acsm_meta)
@@ -572,7 +592,11 @@ function ACSM:fulfillLoan(acsm_path, acsm_meta)
     if not result and reused and isActivationError(err) then
         logger.warn("[ACSM] Saved activation failed, retrying with a new activation:", err)
         self:clearActivation()
-        activation = self:createActivation()
+        local newActivationErr
+        activation, newActivationErr = self:createActivation()
+        if not activation then
+            return nil, newActivationErr
+        end
         Trapper:info(_("Retrying with new activation..."), false, true)
         result, err =
             fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
@@ -618,31 +642,41 @@ function ACSM:openFile(file)
     end
 
     Trapper:wrap(function()
-        Trapper:info(_("Preparing loan..."), false, true)
-        local result, fulfill_err = self:fulfillLoan(file, acsm_meta)
-        if not result then
-            logger.warn("[ACSM] Processing failed:", fulfill_err)
+        local function showProcessingError(err)
+            logger.warn("[ACSM] Processing failed:", err)
             Trapper:reset()
             UIManager:show(InfoMessage:new({
-                text = T(_("ACSM processing failed:\n%1"), trimError(fulfill_err)),
+                text = T(_("ACSM processing failed:\n%1"), trimError(err)),
             }))
-            return
         end
 
-        if self.ui.file_chooser then
-            self.ui.file_chooser:refreshPath()
-        end
+        local ok, unexpectedErr = xpcall(function()
+            Trapper:info(_("Preparing loan..."), false, true)
+            local result, fulfill_err = self:fulfillLoan(file, acsm_meta)
+            if not result then
+                showProcessingError(fulfill_err)
+                return
+            end
 
-        Trapper:clear()
+            if self.ui.file_chooser then
+                self.ui.file_chooser:refreshPath()
+            end
 
-        if self.open_after_download then
-            UIManager:nextTick(function()
-                self:openGeneratedBook(result.outputPath)
-            end)
-        else
-            UIManager:show(InfoMessage:new({
-                text = T(_("Book downloaded:\n%1"), result.outputPath),
-            }))
+            Trapper:clear()
+
+            if self.open_after_download then
+                UIManager:nextTick(function()
+                    self:openGeneratedBook(result.outputPath)
+                end)
+            else
+                UIManager:show(InfoMessage:new({
+                    text = T(_("Book downloaded:\n%1"), result.outputPath),
+                }))
+            end
+        end, debug.traceback)
+
+        if not ok then
+            showProcessingError(unexpectedErr)
         end
     end)
 end

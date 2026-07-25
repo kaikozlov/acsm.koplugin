@@ -27,20 +27,25 @@ end
 -- @param data string (bytes) input data
 -- @return string (bytes) output data (same length)
 function rc4.crypt(state, data)
+    local len = #data
+    if len == 0 then
+        return ""
+    end
+
     local S = state.S
     local ii = state.i
     local jj = state.j
-    local out = {}
-    for n = 1, #data do
+    local out = ffi.new("uint8_t[?]", len)
+    for n = 1, len do
         ii = (ii + 1) % 256
         jj = (jj + S[ii]) % 256
         S[ii], S[jj] = S[jj], S[ii]
         local k = S[(S[ii] + S[jj]) % 256]
-        out[n] = string.char(bit.band(bit.bxor(data:byte(n), k), 0xFF))
+        out[n - 1] = bit.band(bit.bxor(data:byte(n), k), 0xFF)
     end
     state.i = ii
     state.j = jj
-    return table.concat(out)
+    return ffi.string(out, len)
 end
 
 return rc4

@@ -7,30 +7,39 @@ local nativecrypto = require("adobe.util.nativecrypto")
 crypto.deviceKey = {}
 
 function crypto.deviceKey.new(existingKey)
-    local key = {}
-    local meta = { __index = crypto.deviceKey }
-    setmetatable(key, meta)
-    key.key = existingKey or assert(nativecrypto.rand_bytes(16))
-    return key
+    local keyBytes = existingKey
+    if keyBytes == nil then
+        local err
+        keyBytes, err = nativecrypto.rand_bytes(16)
+        if not keyBytes then
+            return nil, err
+        end
+    elseif type(keyBytes) ~= "string" or #keyBytes ~= 16 then
+        return nil, "Device key must be exactly 16 bytes"
+    end
+
+    return setmetatable({ key = keyBytes }, { __index = crypto.deviceKey })
 end
 
 function crypto.deviceKey:encrypt(data)
-    local iv = assert(nativecrypto.rand_bytes(16))
+    local iv, ivErr = nativecrypto.rand_bytes(16)
+    if not iv then
+        return nil, ivErr
+    end
     local encrypted, err = nativecrypto.aes_cbc_encrypt(self.key, iv, data, false)
-    if err ~= nil then
-        error(err)
+    if not encrypted then
+        return nil, err
     end
     return iv .. encrypted
 end
 
 function crypto.deviceKey:decrypt(data)
+    if type(data) ~= "string" or #data < 32 or #data % 16 ~= 0 then
+        return nil, "Invalid device-key ciphertext"
+    end
     local iv = data:sub(1, 16)
     local encrypted = data:sub(17)
-    local decrypted, err = nativecrypto.aes_cbc_decrypt(self.key, iv, encrypted, false)
-    if err ~= nil then
-        error(err)
-    end
-    return decrypted
+    return nativecrypto.aes_cbc_decrypt(self.key, iv, encrypted, false)
 end
 
 function crypto.encryptLogin(username, password, deviceKey, authCert)
@@ -39,15 +48,22 @@ function crypto.encryptLogin(username, password, deviceKey, authCert)
     buffer = buffer .. username
     buffer = buffer .. string.char(password:len())
     buffer = buffer .. password
-    local encrypted, err = nativecrypto.encrypt_with_cert(util.base64.decode(authCert), buffer)
-    if err ~= nil then
-        error(err)
+    local certDer = util.base64.decode(authCert)
+    if not certDer or certDer == "" then
+        return nil, "Invalid authentication certificate"
+    end
+    local encrypted, err = nativecrypto.encrypt_with_cert(certDer, buffer)
+    if not encrypted then
+        return nil, err
     end
     return util.base64.encode(encrypted)
 end
 
 function crypto.serial()
-    local rand = assert(nativecrypto.rand_bytes(20))
+    local rand, err = nativecrypto.rand_bytes(20)
+    if not rand then
+        return nil, err
+    end
     local serial = ""
     for i = 1, 20 do
         serial = serial .. string.format("%02x", rand:byte(i))
@@ -56,11 +72,19 @@ function crypto.serial()
 end
 
 function crypto.nonce()
-    return util.base64.encode(assert(nativecrypto.rand_bytes(12)))
+    local bytes, err = nativecrypto.rand_bytes(12)
+    if not bytes then
+        return nil, err
+    end
+    return util.base64.encode(bytes)
 end
 
 function crypto.fingerprint(serial, deviceKey)
-    return util.base64.encode(assert(nativecrypto.sha1(serial .. deviceKey.key)))
+    local digest, err = nativecrypto.sha1(serial .. deviceKey.key)
+    if not digest then
+        return nil, err
+    end
+    return util.base64.encode(digest)
 end
 
 crypto.key = {}
@@ -70,10 +94,11 @@ function crypto.key.new(k)
     if k ~= nil then
         key, err = nativecrypto.key_from_private_der(k)
     else
-        key, err = nativecrypto.generate_rsa_key(1025, 65537)
+        -- Adobe ADE and the reference implementation use 1024-bit auth/license keys.
+        key, err = nativecrypto.generate_rsa_key(1024, 65537)
     end
-    if err ~= nil then
-        error(err)
+    if not key then
+        return nil, err
     end
 
     local wrapped = {
@@ -85,37 +110,37 @@ function crypto.key.new(k)
 end
 
 function crypto.key:topkcs8()
-    local pkcs8, err = self.pkey:to_pkcs8_der()
-    if err ~= nil then
-        error(err)
-    end
-    return pkcs8
+    return self.pkey:to_pkcs8_der()
 end
 
 function crypto.decodepkcs12(pk, deviceKey)
+    local der = util.base64.decode(pk)
+    if not der or der == "" then
+        return nil, "Invalid PKCS12 data"
+    end
     local pass = util.base64.encode(deviceKey.key)
-    local decoded, err = nativecrypto.parse_pkcs12(util.base64.decode(pk), pass)
-    if err ~= nil then
-        error(err)
+    local decoded, err = nativecrypto.parse_pkcs12(der, pass)
+    if not decoded then
+        return nil, err
     end
     return decoded.key
 end
 
 local function sign(key, data)
     local sig, err = key:sign_raw(data, nativecrypto.RSA_PKCS1_PADDING)
-    if err ~= nil then
-        error(err)
+    if not sig then
+        return nil, err
     end
     return util.base64.encode(sig)
 end
 
-local function sha1(data)
-    return assert(nativecrypto.sha1(data))
-end
-
 function crypto.signXML(name, key, tb)
     local encoded = asn1.element(name, tb)
-    return sign(key, sha1(encoded))
+    local digest, err = nativecrypto.sha1(encoded)
+    if not digest then
+        return nil, err
+    end
+    return sign(key, digest)
 end
 
 return crypto

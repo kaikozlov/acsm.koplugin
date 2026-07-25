@@ -56,7 +56,11 @@ end
 function xml.adobeSigned(name, pkey, tb)
     -- make a temporary copy of the table to avoid modifying the original
     local tosign = xml.addNamespace(util.deepTableCopy(tb), "http://ns.adobe.com/adept", "http://ns.adobe.com/adept")
-    tb.signature = crypto.signXML("http://ns.adobe.com/adept:" .. name, pkey, tosign)
+    local signature, err = crypto.signXML("http://ns.adobe.com/adept:" .. name, pkey, tosign)
+    if not signature then
+        return nil, err
+    end
+    tb.signature = signature
     tb = xml.addNamespace(tb, "adept", "http://ns.adobe.com/adept")
     tb = xml.serialize(tb, "adept:" .. name)
     tb = xml.addHeader(tb)

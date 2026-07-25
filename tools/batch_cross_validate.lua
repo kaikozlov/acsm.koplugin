@@ -167,15 +167,40 @@ for i, book in ipairs(PDF_ACSM_URLS) do
 
     -- Fresh activation per book
     print("  Activating...")
-    local auth_info = adobe.getAuthenticationServiceInfo()
-    local creds = adobe.signIn("anonymous", "", "", auth_info.certificate)
+    local auth_info, authErr = adobe.getAuthenticationServiceInfo()
+    if not auth_info then
+        print("  SKIP: authentication service failed: " .. tostring(authErr))
+        entry.status = "skip"; entry.error = "auth service: " .. tostring(authErr)
+        table.insert(results, entry); goto next_book
+    end
+    local creds, signInErr = adobe.signIn("anonymous", "", "", auth_info.certificate)
+    if not creds then
+        print("  SKIP: sign-in failed: " .. tostring(signInErr))
+        entry.status = "skip"; entry.error = "sign-in: " .. tostring(signInErr)
+        table.insert(results, entry); goto next_book
+    end
     local deviceUUID, fingerprint = adobe.activate(creds.user, creds.deviceKey, creds.pkcs12)
+    if not deviceUUID then
+        print("  SKIP: activation failed: " .. tostring(fingerprint))
+        entry.status = "skip"; entry.error = "activation: " .. tostring(fingerprint)
+        table.insert(results, entry); goto next_book
+    end
     print("  Activated: " .. tostring(deviceUUID):sub(1, 20) .. "...")
 
-    local pkcs12Key = crypto.decodepkcs12(creds.pkcs12, creds.deviceKey)
+    local pkcs12Key, pkcs12Err = crypto.decodepkcs12(creds.pkcs12, creds.deviceKey)
+    if not pkcs12Key then
+        print("  SKIP: PKCS12 decode failed: " .. tostring(pkcs12Err))
+        entry.status = "skip"; entry.error = "PKCS12: " .. tostring(pkcs12Err)
+        table.insert(results, entry); goto next_book
+    end
     local userUUID = creds.user
     if type(userUUID) == "table" then userUUID = userUUID[1] end
-    local userCert = fulfillment.extractCertFromPKCS12(creds.pkcs12, creds.deviceKey)
+    local userCert, certErr = fulfillment.extractCertFromPKCS12(creds.pkcs12, creds.deviceKey)
+    if not userCert then
+        print("  SKIP: certificate extraction failed: " .. tostring(certErr))
+        entry.status = "skip"; entry.error = "certificate: " .. tostring(certErr)
+        table.insert(results, entry); goto next_book
+    end
 
     -- Parse ACSM
     local acsmParsed = xml_mod.deserialize(acsmBody)

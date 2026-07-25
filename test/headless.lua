@@ -113,7 +113,7 @@ describe("Module loading (in KOReader environment)", function(test)
     end)
 
     test("nativecrypto can generate RSA key", function()
-        local key, err = nativecrypto.generate_rsa_key(1025, 65537)
+        local key, err = nativecrypto.generate_rsa_key(1024, 65537)
         assert(key, err or "generate_rsa_key returned nil")
     end)
 
@@ -194,7 +194,7 @@ describe("Crypto round-trips (KOReader's OpenSSL)", function(test)
     end)
 
     test("RSA keygen + sign + verify", function()
-        local key = assert(nativecrypto.generate_rsa_key(1025, 65537))
+        local key = assert(nativecrypto.generate_rsa_key(1024, 65537))
         local data = "sign this message please"
         local hash = assert(nativecrypto.sha1(data))
         local sig = assert(key:sign_raw(hash))

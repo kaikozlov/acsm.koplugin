@@ -235,28 +235,48 @@ describe("main.lua helpers & orchestration", function()
 
             rmTmpDir(tmp)
         end)
+
+        it("clears a structurally complete activation with a corrupt private key", function()
+            local main, tmp = loadInTmpDir("restore-corrupt-key")
+            local base64 = require("adobe.util.util").base64
+            main:loadSettings()
+            main.activation_blob = {
+                deviceKey = base64.encode(string.rep("\0", 16)),
+                privateLicenseKey = base64.encode("not valid private DER"),
+                user = "urn:uuid:user",
+                pkcs12 = "present",
+                deviceUUID = "urn:uuid:device",
+                fingerprint = "present",
+            }
+            main:saveSettings()
+
+            local result, err = main:restoreActivation()
+            assert.is_nil(result)
+            assert.is_truthy(err)
+            assert.is_nil(main.activation_blob)
+
+            rmTmpDir(tmp)
+        end)
     end)
 
     -- ================================================================
     -- createActivation (error paths only — stubs network modules)
     -- ================================================================
     describe("createActivation", function()
-        it("errors when network is unavailable", function()
+        it("returns an error when network is unavailable", function()
             local main, tmp = loadInTmpDir("create-no-net")
             main:loadSettings()
 
-            -- Stub adobe.getAuthenticationServiceInfo to error
             local adobe = require("adobe.adobe")
             local orig = adobe.getAuthenticationServiceInfo
             adobe.getAuthenticationServiceInfo = function()
-                error("network unreachable")
+                return nil, "network unreachable"
             end
 
-            local ok, err = pcall(function()
-                main:createActivation()
-            end)
-            assert.is_false(ok)
-            assert.is.truthy(tostring(err):find("network unreachable"))
+            local activation, err = main:createActivation()
+            assert.is_nil(activation)
+            assert.is_truthy(err)
+            assert.is_truthy(err:find("network unreachable", 1, true))
 
             adobe.getAuthenticationServiceInfo = orig
             rmTmpDir(tmp)
@@ -615,24 +635,20 @@ describe("main.lua helpers & orchestration", function()
     -- fulfillLoan (stubbed network)
     -- ================================================================
     describe("fulfillLoan", function()
-        it("errors when getActivation returns nil", function()
+        it("returns an error when getActivation returns nil", function()
             local main, tmp = loadInTmpDir("fulfill-no-act")
             main:loadSettings()
 
-            -- Stub getActivation to return nil
             main.getActivation = function(self, force_new)
                 return nil, "No activation"
             end
 
-            -- fulfillLoan will error trying to index nil activation
-            local ok, err = pcall(function()
-                main:fulfillLoan("/test/book.acsm", {
-                    title = "Test Book",
-                    resourceId = "urn:uuid:test",
-                })
-            end)
-            assert.is_false(ok)
-            assert.is.truthy(tostring(err):find("nil value"))
+            local result, err = main:fulfillLoan("/test/book.acsm", {
+                title = "Test Book",
+                resourceId = "urn:uuid:test",
+            })
+            assert.is_nil(result)
+            assert.are.equal("No activation", err)
 
             rmTmpDir(tmp)
         end)
@@ -852,6 +868,38 @@ describe("main.lua helpers & orchestration", function()
                 rmTmpDir(tmp)
             end)
         end
+
+        it("resets progress and shows a clean error when processing throws unexpectedly", function()
+            local main, tmp = loadInTmpDir("openfile-unexpected-error")
+            local NetworkMgr = require("ui/network/manager")
+            local Trapper = require("ui/trapper")
+            local UIManager = require("ui/uimanager")
+            local original_will_rerun = NetworkMgr.willRerunWhenOnline
+            local original_show = UIManager.show
+            local shown_error
+
+            NetworkMgr.willRerunWhenOnline = function()
+                return false
+            end
+            main.fulfillLoan = function()
+                error("unexpected workflow failure")
+            end
+            UIManager.show = function(self, widget)
+                if widget and type(widget.text) == "string" and widget.text:find("ACSM processing failed", 1, true) then
+                    shown_error = widget.text
+                end
+                return original_show(self, widget)
+            end
+
+            main:openFile(tmp .. "/loan.acsm")
+
+            NetworkMgr.willRerunWhenOnline = original_will_rerun
+            UIManager.show = original_show
+            assert.is_nil(Trapper.current_widget)
+            assert.is_truthy(shown_error)
+            assert.is_truthy(shown_error:find("unexpected workflow failure", 1, true))
+            rmTmpDir(tmp)
+        end)
 
         it("is a no-op for non-acsm files", function()
             local main, tmp = loadInTmpDir("openfile-noacsm")

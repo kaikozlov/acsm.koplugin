@@ -74,6 +74,28 @@ local function adeptPost(endpoint, body)
     })
 end
 
+local function deserializeXml(body, context)
+    local ok, parsed = pcall(xml.deserialize, body)
+    if not ok then
+        return nil, context .. " returned malformed XML: " .. tostring(parsed)
+    end
+    if type(parsed) ~= "table" then
+        return nil, context .. " returned an invalid XML document"
+    end
+    return parsed
+end
+
+local function xmlError(parsed, fallback)
+    local err = parsed and parsed.error
+    if type(err) == "table" and err._attr and err._attr.data then
+        return err._attr.data
+    end
+    if type(err) == "string" then
+        return err
+    end
+    return fallback
+end
+
 local function collectNotifyUrls(node, nsMap, urls)
     urls = urls or {}
     for _, child in ipairs(node._children or {}) do
@@ -131,15 +153,27 @@ function fulfillment.operatorAuth(operatorURL, userUUID, userCert, licenseCert, 
     if not resp then
         return nil, "Operator auth failed: " .. tostring(err)
     end
-    local parsed = xml.deserialize(resp or "")
-    if parsed and parsed.error then
-        return nil, "Operator auth failed: " .. (parsed.error._attr and parsed.error._attr.data or resp)
+    if resp == "" then
+        return nil, "Operator auth failed: empty response"
+    end
+    local parsed, parseErr = deserializeXml(resp, "Operator auth")
+    if not parsed then
+        return nil, "Operator auth failed: " .. parseErr
+    end
+    if parsed.error then
+        return nil, "Operator auth failed: " .. xmlError(parsed, resp)
+    end
+    if parsed.success == nil then
+        return nil, "Operator auth failed: unexpected response"
     end
     return true
 end
 
 function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, signingKey)
-    local nonce = crypto.nonce()
+    local nonce, nonceErr = crypto.nonce()
+    if not nonce then
+        return nil, "InitLicenseService nonce failed: " .. tostring(nonceErr)
+    end
     local expiration = util.expiration(10)
 
     local body = '<?xml version="1.0"?>\n'
@@ -161,9 +195,18 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
     if not resp then
         return nil, "InitLicenseService failed: " .. tostring(err)
     end
-    local parsed = xml.deserialize(resp or "")
-    if parsed and parsed.error then
-        return nil, "InitLicenseService error: " .. (parsed.error._attr and parsed.error._attr.data or resp)
+    if resp == "" then
+        return nil, "InitLicenseService failed: empty response"
+    end
+    local parsed, parseErr = deserializeXml(resp, "InitLicenseService")
+    if not parsed then
+        return nil, parseErr
+    end
+    if parsed.error then
+        return nil, "InitLicenseService error: " .. xmlError(parsed, resp)
+    end
+    if parsed.success == nil then
+        return nil, "InitLicenseService failed: unexpected response"
     end
     return true
 end
@@ -174,7 +217,10 @@ function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signin
         return nil, "Cannot open ACSM file: " .. tostring(acsmPath)
     end
 
-    local acsmParsed = xml.deserialize(acsmContent)
+    local acsmParsed, parseErr = deserializeXml(acsmContent, "ACSM")
+    if not acsmParsed then
+        return nil, parseErr
+    end
     local token = acsmParsed.fulfillmentToken
     if not token then
         return nil, "No fulfillmentToken in ACSM"
@@ -224,9 +270,12 @@ function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signin
         return nil, "Fulfill request failed: " .. tostring(code)
     end
 
-    local parsed = xml.deserialize(resp)
+    local parsed, responseParseErr = deserializeXml(resp, "Fulfill")
+    if not parsed then
+        return nil, responseParseErr
+    end
     if parsed.error then
-        return nil, "Fulfill error: " .. (parsed.error._attr and parsed.error._attr.data or resp)
+        return nil, "Fulfill error: " .. xmlError(parsed, resp)
     end
 
     local root = dom.parse(resp)
@@ -302,7 +351,10 @@ function fulfillment.decryptBookKey(encryptedKeyB64, licenseKey)
 end
 
 function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
-    local nonce = crypto.nonce()
+    local nonce, nonceErr = crypto.nonce()
+    if not nonce then
+        return nil, nonceErr
+    end
     local expiration = util.expiration(10)
 
     local body = '<?xml version="1.0"?>\n'
@@ -319,7 +371,10 @@ function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
     body = body .. "</adept:notification>"
 
     logger.info("[ACSM] Notify:", notifyURL)
-    adeptPost(notifyURL, body)
+    local response, err = adeptPost(notifyURL, body)
+    if not response then
+        return nil, err
+    end
     return true
 end
 
@@ -344,8 +399,15 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     if not acsmContent then
         return nil, "Cannot open ACSM file: " .. tostring(acsmPath)
     end
-    local acsmParsed = xml.deserialize(acsmContent)
-    local operatorURL = acsmParsed.fulfillmentToken.operatorURL
+    local acsmParsed, acsmParseErr = deserializeXml(acsmContent, "ACSM")
+    if not acsmParsed then
+        return nil, acsmParseErr
+    end
+    local token = acsmParsed.fulfillmentToken
+    if type(token) ~= "table" then
+        return nil, "No fulfillmentToken in ACSM"
+    end
+    local operatorURL = token.operatorURL
     if type(operatorURL) == "table" then
         operatorURL = operatorURL[1]
     end
@@ -355,10 +417,16 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     logger.info("[ACSM] fulfillment.process: operatorURL=", operatorURL)
 
     logger.info("[ACSM] fulfillment.process: decoding pkcs12...")
-    local pkcs12Key = crypto.decodepkcs12(creds.pkcs12, creds.deviceKey)
+    local pkcs12Key, pkcs12Err = crypto.decodepkcs12(creds.pkcs12, creds.deviceKey)
+    if not pkcs12Key then
+        return nil, "Failed to decode PKCS12: " .. tostring(pkcs12Err)
+    end
     local activationURL = creds.activationURL or "https://adeactivate.adobe.com/adept"
     if not creds.activationURL and creds.activationXml then
-        local activationParsed = xml.deserialize(creds.activationXml)
+        local activationParsed, activationParseErr = deserializeXml(creds.activationXml, "Saved activation")
+        if not activationParsed then
+            return nil, activationParseErr
+        end
         local activationToken = activationParsed.activationInfo and activationParsed.activationInfo.activationToken
             or activationParsed.activationToken
         if activationToken and activationToken.activationURL then
@@ -386,7 +454,10 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
     if err and err:find("E_ADEPT_DISTRIBUTOR_AUTH") then
         logger.info("[ACSM] fulfillment.process: got DISTRIBUTOR_AUTH error, retrying operator auth...")
-        fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
+        local authOk, authErr = fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
+        if not authOk then
+            return nil, authErr
+        end
         result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
     end
     if err then

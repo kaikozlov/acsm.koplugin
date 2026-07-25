@@ -241,7 +241,7 @@ Key PDF modules:
 
 ### Test coverage overview
 
-635 tests total (excluding e2e). Key areas:
+647 tests total (excluding e2e). Key areas:
 
 | Area | Spec file | Tests |
 |---|---|---|
@@ -251,26 +251,26 @@ Key PDF modules:
 | Crypto round-trips | `integration/crypto_spec.lua` | 5 |
 | DOM parse/serialize round-trip | `integration/dom_spec.lua` | 10 |
 | EPUB decryption pipeline | `integration/epub_spec.lua` | 7 |
-| Fulfillment flow (stubbed HTTP) | `integration/fulfillment_flow_spec.lua` | 7 |
+| Fulfillment flow (stubbed HTTP) | `integration/fulfillment_flow_spec.lua` | 9 |
 | Fulfillment internals (sign, notify) | `integration/fulfillment_internals_spec.lua` | 11 |
 | Plugin lifecycle | `integration/plugin_lifecycle_spec.lua` | 18 |
 | main.lua helpers (metadata, paths) | `integration/main_spec.lua` | 10 |
 | Module loading | `integration/module_loading_spec.lua` | 12 |
 | Naming utilities | `integration/naming_spec.lua` + `naming_spec.lua` | 23 |
 | zlib inflate round-trip | `integration/zlib_spec.lua` | 10 |
-| EPUB internals | `epub_spec.lua` | 22 |
+| EPUB internals | `epub_spec.lua` | 24 |
 | Fulfillment smoke | `fulfillment_spec.lua` | 3 |
 | deletePluginSettings hook | `integration/delete_settings_spec.lua` | 12 |
-| RC4 cipher | `integration/rc4_spec.lua` | 18 |
-| PDF key derivation | `integration/pdfcrypt_spec.lua` | 22 |
+| RC4 cipher | `integration/rc4_spec.lua` | 19 |
+| PDF key derivation | `integration/pdfcrypt_spec.lua` | 23 |
 | PDF tokenizer/parser | `integration/pdf_parser_spec.lua` | 81 |
 | PDF serializer/writer | `integration/pdf_writer_spec.lua` | 34 |
 | PDF document reader | `integration/pdfdoc_spec.lua` | 9 |
-| PDF decrypt internals | `integration/pdf_decrypt_spec.lua` | 21 |
+| PDF decrypt internals | `integration/pdf_decrypt_spec.lua` | 22 |
 | PDF decrypt pipeline (synthetic) | `integration/pdf_pipeline_spec.lua` | 4 |
 | nativecrypto edge cases | `integration/nativecrypto_spec.lua` | 13 |
 | util.lua (base64, copy, endpoint) | `integration/util_spec.lua` | 17 |
-| adobe.lua isolated (serialize, restore) | `integration/adobe_spec.lua` | 10 |
+| adobe.lua isolated (serialize, restore) | `integration/adobe_spec.lua` | 12 |
 | Cross-validation | `integration/cross_validate_spec.lua` | 33 |
 | External-open user patch (routing) | `integration/userpatch_spec.lua` | 5 |
 | External-open user patch (real instances) | `integration/userpatch_e2e_spec.lua` | 2 |

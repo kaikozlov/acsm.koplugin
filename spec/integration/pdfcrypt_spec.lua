@@ -159,7 +159,7 @@ describe("PDF key derivation", function()
         -- Helper: compute the KEK and IV that removeHardening will derive,
         -- then AES-CBC encrypt plaintext so removeHardening can decrypt it.
         -- This is a TRUE round-trip test — no nil-tolerance hacks.
-        local function encrypt_for_removeHardening(keyType, plaintext, res, dev, ful)
+        local function encrypt_for_removeHardening(keyType, plaintext, res, dev, ful, alreadyPadded)
             local sha2 = require("ffi/sha2")
 
             -- Derive KEK (same as removeHardening)
@@ -185,12 +185,16 @@ describe("PDF key derivation", function()
             end
             local iv = table.concat(ivParts)
 
-            -- PKCS7-pad the plaintext
-            local padLen = 16 - (#plaintext % 16)
-            if padLen == 0 then
-                padLen = 16
+            -- PKCS7-pad the plaintext unless the caller supplied a malformed
+            -- block explicitly for a negative test.
+            local padded = plaintext
+            if not alreadyPadded then
+                local padLen = 16 - (#plaintext % 16)
+                if padLen == 0 then
+                    padLen = 16
+                end
+                padded = plaintext .. string.rep(string.char(padLen), padLen)
             end
-            local padded = plaintext .. string.rep(string.char(padLen), padLen)
 
             -- AES-CBC encrypt (no_padding=true = we provide pre-padded data)
             local ciphertext = nativecrypto.aes_cbc_encrypt(kek, iv, padded, true)
@@ -206,6 +210,17 @@ describe("PDF key derivation", function()
             assert.is_truthy(result, "removeHardening returned nil")
             assert.equals("string", type(result))
             assert.equals(plaintext, result)
+        end)
+
+        it("should reject inconsistent PKCS7 padding bytes", function()
+            local keyType = "3"
+            local malformed = string.rep("A", 14) .. string.char(0x99, 0x02)
+            local ciphertext = encrypt_for_removeHardening(keyType, malformed, RES_UUID, DEV_UUID, FUL_UUID, true)
+
+            local result, err = pdfcrypt.removeHardening(ciphertext, keyType, RES_UUID, DEV_UUID, FUL_UUID, nativecrypto.aes_cbc_decrypt)
+            assert.is_nil(result)
+            assert.is_truthy(err)
+            assert.is_truthy(err:find("PKCS", 1, true))
         end)
 
         it("should round-trip for keyType=10", function()

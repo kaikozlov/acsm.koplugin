@@ -298,6 +298,19 @@ local function make_rc4_decipher(bookKey, genkey_fn)
     end
 end
 
+local function unpadPkcs7(data)
+    local padLen = #data > 0 and data:byte(#data) or nil
+    if not padLen or padLen < 1 or padLen > 16 or padLen > #data then
+        return nil, "Invalid PKCS#7 padding"
+    end
+    for i = #data - padLen + 1, #data do
+        if data:byte(i) ~= padLen then
+            return nil, "Invalid PKCS#7 padding"
+        end
+    end
+    return data:sub(1, #data - padLen)
+end
+
 --- Create an AES-CBC decipher function for per-object decryption.
 -- Matches ineptpdf.py PDFDocument.decrypt_aes
 local function make_aes_decipher(bookKey, genkey_fn)
@@ -312,14 +325,11 @@ local function make_aes_decipher(bookKey, genkey_fn)
         if not decrypted then
             return data
         end
-        -- Remove PKCS7 padding (unpad from ineptpdf.py)
-        if #decrypted > 0 then
-            local padLen = decrypted:byte(#decrypted)
-            if padLen > 0 and padLen <= 16 then
-                decrypted = decrypted:sub(1, #decrypted - padLen)
-            end
+        local unpadded = unpadPkcs7(decrypted)
+        if not unpadded then
+            return data
         end
-        return decrypted
+        return unpadded
     end
 end
 
