@@ -1,28 +1,5 @@
 # Project: acsm.koplugin
 
-## LuaJIT & LuaRocks Setup (host)
-
-### Installed versions
-- **LuaJIT 2.1** (Lua 5.1) — `/opt/homebrew/bin/luajit`
-- **Lua 5.5** — `/opt/homebrew/bin/lua` (default)
-- **LuaRocks 3.13.0** — `/opt/homebrew/bin/luarocks`
-
-### Commands
-
-| What | Command |
-|---|---|
-| Run LuaJIT | `luajit script.lua` |
-| Install a rock (LuaJIT/Lua 5.1) | `luarocks --lua-version 5.1 install <name>` |
-| List rocks (Lua 5.1) | `luarocks --lua-version 5.1 list` |
-| Run Lua 5.5 (default) | `lua script.lua` |
-| Install a rock (Lua 5.5) | `luarocks install <name>` |
-
-### Config
-- LuaRocks LuaJIT config: `~/.luarocks/config-5.1.lua`
-- The `--lua-version 5.1` flag tells LuaRocks to use the LuaJIT config instead of the default Lua 5.5.
-
----
-
 ## Testing
 
 All tests run inside Docker against **real KOReader** (headless). No mocks,
@@ -142,7 +119,7 @@ fm:onClose()
 UIManager:quit()
 ```
 
-#### Why this matters: test the entry point, not the function
+#### Test the entry point, not the function
 
 A common trap: your unit test calls the plugin function in isolation, it passes,
 but the feature still breaks on-device because **KOReader reaches it through a
@@ -239,45 +216,6 @@ Key PDF modules:
 | `adobe/pdf/pdfcrypt.lua` | Key derivation (genkey v2-v5) + hardening removal |
 | `adobe/pdf/rc4.lua` | Pure-Lua RC4 stream cipher |
 
-### Test coverage overview
-
-647 tests total (excluding e2e). Key areas:
-
-| Area | Spec file | Tests |
-|---|---|---|
-| ASN.1 encoding + signing | `integration/signing_spec.lua` | 37 |
-| Adobe hash buffer + digest | `integration/hashbuffer_spec.lua` | 11 |
-| XML request builders | `integration/xml_builders_spec.lua` | 10 |
-| Crypto round-trips | `integration/crypto_spec.lua` | 5 |
-| DOM parse/serialize round-trip | `integration/dom_spec.lua` | 10 |
-| EPUB decryption pipeline | `integration/epub_spec.lua` | 7 |
-| Fulfillment flow (stubbed HTTP) | `integration/fulfillment_flow_spec.lua` | 9 |
-| Fulfillment internals (sign, notify) | `integration/fulfillment_internals_spec.lua` | 11 |
-| Plugin lifecycle | `integration/plugin_lifecycle_spec.lua` | 18 |
-| main.lua helpers (metadata, paths) | `integration/main_spec.lua` | 10 |
-| Module loading | `integration/module_loading_spec.lua` | 12 |
-| Naming utilities | `integration/naming_spec.lua` + `naming_spec.lua` | 23 |
-| zlib inflate round-trip | `integration/zlib_spec.lua` | 10 |
-| EPUB internals | `epub_spec.lua` | 24 |
-| Fulfillment smoke | `fulfillment_spec.lua` | 3 |
-| deletePluginSettings hook | `integration/delete_settings_spec.lua` | 12 |
-| RC4 cipher | `integration/rc4_spec.lua` | 19 |
-| PDF key derivation | `integration/pdfcrypt_spec.lua` | 23 |
-| PDF tokenizer/parser | `integration/pdf_parser_spec.lua` | 81 |
-| PDF serializer/writer | `integration/pdf_writer_spec.lua` | 34 |
-| PDF document reader | `integration/pdfdoc_spec.lua` | 9 |
-| PDF decrypt internals | `integration/pdf_decrypt_spec.lua` | 22 |
-| PDF decrypt pipeline (synthetic) | `integration/pdf_pipeline_spec.lua` | 4 |
-| nativecrypto edge cases | `integration/nativecrypto_spec.lua` | 13 |
-| util.lua (base64, copy, endpoint) | `integration/util_spec.lua` | 17 |
-| adobe.lua isolated (serialize, restore) | `integration/adobe_spec.lua` | 12 |
-| Cross-validation | `integration/cross_validate_spec.lua` | 33 |
-| External-open user patch (routing) | `integration/userpatch_spec.lua` | 5 |
-| External-open user patch (real instances) | `integration/userpatch_e2e_spec.lua` | 2 |
-| E2E EPUB (Adobe servers) | `integration/e2e_spec.lua` | 2 |
-| E2E PDF (Adobe servers) | `integration/pdf_e2e_spec.lua` | 2 |
-| E2E patch + real fulfillment (Adobe servers) | `integration/userpatch_e2e_fulfillment_spec.lua` | 1 |
-
 ### Key API note: crypto.key wrapper vs raw PKey
 
 `crypto.key.new()` returns a **wrapper** with `.pkey` holding the raw
@@ -329,11 +267,3 @@ test to `spec/integration/delete_settings_spec.lua`.
 
 The test file uses isolated temp directories — each test creates its own,
 and cleans up at the end.
-
-### Reference
-
-- `REFERENCE/koreader/spec/unit/commonrequire.lua` — the upstream pattern
-- koreader/koreader#15240 — PR that added `deletePluginSettings` to PluginLoader
-- koreader/koreader#15245 — follow-up separating built-in vs user plugins
-
-
