@@ -14,7 +14,7 @@
 #   just sync-shared   # refresh just/shared.just (then commit)
 
 plugin_name := "acsm"
-koplugin_dev_version := "v2026.03_7"
+koplugin_dev_version := "v2026.07_1"
 # Git ref used by `just sync-shared` (recipe source). Independent of the image pin.
 koplugin_dev_ref := env("KOPLUGIN_DEV_REF", "main")
 plugin_path := "/opt/plugin"

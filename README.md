@@ -33,7 +33,7 @@ The resulting EPUB or PDF is saved next to the original `.acsm` file and works l
 
 ### Compatibility
 
-Tested on Kindle with KOReader v2026.03. Should work on any KOReader device (Kobo, reMarkable, PocketBook, etc.) — the plugin uses only libraries bundled with standard KOReader builds.
+Tested on Kindle with KOReader v2026.07. Should work on any KOReader device (Kobo, reMarkable, PocketBook, etc.) — the plugin uses only libraries bundled with standard KOReader builds.
 
 ### Troubleshooting
 

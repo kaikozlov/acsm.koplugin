@@ -92,7 +92,7 @@ fail with a network or HTTP error.
 
 ### How it works
 
-- **Image**: `ghcr.io/kaikozlov/koplugin-dev:v2026.03_7` — unified dev image
+- **Image**: `ghcr.io/kaikozlov/koplugin-dev:v2026.07_1` — unified dev image
   with KOReader + busted + luacheck + stylua.
 - **KOReader**: extracted to `/opt/lib/koreader/`, includes bundled `luajit`.
 - **Plugin**: bind-mounted at `/opt/plugin`, auto-symlinked into KOReader's
@@ -191,7 +191,7 @@ docker run --rm -e SDL_VIDEODRIVER=dummy \
   -v "$PWD:/opt/plugin" \
   -v /tmp/probe_spec.lua:/tmp/probe_spec.lua \
   -e PLUGIN_NAME=acsm \
-  ghcr.io/kaikozlov/koplugin-dev:v2026.03_7 \
+  ghcr.io/kaikozlov/koplugin-dev:v2026.07_1 \
   busted-koreader --verbose --helper=/opt/koplugin-dev/commonrequire.lua \
   /tmp/probe_spec.lua
 ```
@@ -301,7 +301,7 @@ This is consistent with all real call sites (`adobe.activate`,
 
 ## Plugin Cleanup: `deletePluginSettings()`
 
-KOReader's Plugin Manager (v2026.03+) lets users delete plugins via long-press.
+KOReader's Plugin Manager (v2026.07+) lets users delete plugins via long-press.
 A checkbox "Also delete plugin settings" appears; it is **grayed out** unless the
 plugin implements `deletePluginSettings()` on its instance. PluginLoader calls it
 via `pcall(fn, instance)` — no parameters, no return value needed.
