@@ -70,12 +70,15 @@ describe("nativecrypto edge cases", function()
         local sigLen = libcrypto.X509_sign(cert, pkey.ctx, md)
         assert(sigLen > 0, "X509_sign failed")
 
-        -- Export DER via i2d_X509 (already declared in nativecrypto)
+        -- Export DER via i2d_X509 using two-pass (no library allocator)
+        local len = libcrypto.i2d_X509(cert, nil)
+        assert(len > 0, "i2d_X509 length query failed")
+        local buf = ffi.new("unsigned char[?]", len)
         local out = ffi.new("unsigned char *[1]")
-        local len = libcrypto.i2d_X509(cert, out)
-        assert(len > 0, "i2d_X509 failed")
-        local der = ffi.string(out[0], len)
-        libcrypto.CRYPTO_free(out[0])
+        out[0] = buf
+        local written = libcrypto.i2d_X509(cert, out)
+        assert(written == len, "i2d_X509 write failed")
+        local der = ffi.string(buf, written)
         return der
     end
 

@@ -141,7 +141,6 @@ PKCS12 *d2i_PKCS12_bio(BIO *bp, PKCS12 **p12);
 int PKCS12_parse(PKCS12 *p12, const char *pass, EVP_PKEY **pkey, X509 **cert, void *ca);
 void PKCS12_free(PKCS12 *a);
 
-void CRYPTO_free(void *ptr);
 ]])
 
 -- Old Android OpenSSL 1.0.x builds need their global cipher/digest lookup
@@ -169,21 +168,27 @@ local nativecrypto = {
 local uchar_pp = ffi.typeof("unsigned char *[1]")
 local const_uchar_pp = ffi.typeof("const unsigned char *[1]")
 
-local function crypto_free(ptr)
-    if ptr ~= nil then
-        libcrypto.CRYPTO_free(ptr)
-    end
-end
-
+--- Serialize an object to a DER string via a two-pass i2d_* call.
+-- First pass: call with NULL output pointer to get the required length.
+-- Second pass: provide our own GC-managed buffer to receive the output.
+-- This avoids relying on the library's allocator (CRYPTO_free/OPENSSL_free),
+-- whose exported symbol and ABI vary across BoringSSL/LibreSSL/OpenSSL builds.
 local function i2d_to_string(fn, obj)
-    local out = uchar_pp()
-    local len = fn(obj, out)
-    if len == nil or len <= 0 or out[0] == nil then
+    local len = fn(obj, nil)
+    if len == nil or len <= 0 then
         return nil, "DER serialization failed"
     end
-    local data = ffi.string(out[0], len)
-    crypto_free(out[0])
-    return data
+
+    local buf = ffi.new("unsigned char[?]", len)
+    local out = uchar_pp()
+    out[0] = buf
+
+    local written = fn(obj, out)
+    if written == nil or written ~= len then
+        return nil, string.format("DER serialization failed: expected %d bytes, wrote %s", len, tostring(written))
+    end
+
+    return ffi.string(buf, written)
 end
 
 local function der_pointer(data)
