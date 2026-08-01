@@ -69,7 +69,7 @@ fail with a network or HTTP error.
 
 ### How it works
 
-- **Image**: `ghcr.io/kaikozlov/koplugin-dev:v2026.07_1` — unified dev image
+- **Image**: `ghcr.io/kaikozlov/koplugin-dev` — unified dev image
   with KOReader + busted + luacheck + stylua.
 - **KOReader**: extracted to `/opt/lib/koreader/`, includes bundled `luajit`.
 - **Plugin**: bind-mounted at `/opt/plugin`, auto-symlinked into KOReader's
@@ -168,7 +168,7 @@ docker run --rm -e SDL_VIDEODRIVER=dummy \
   -v "$PWD:/opt/plugin" \
   -v /tmp/probe_spec.lua:/tmp/probe_spec.lua \
   -e PLUGIN_NAME=acsm \
-  ghcr.io/kaikozlov/koplugin-dev:v2026.07_1 \
+  ghcr.io/kaikozlov/koplugin-dev:v2026.07.1_1 \
   busted-koreader --verbose --helper=/opt/koplugin-dev/commonrequire.lua \
   /tmp/probe_spec.lua
 ```
