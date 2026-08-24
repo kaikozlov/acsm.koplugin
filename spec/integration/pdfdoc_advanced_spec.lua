@@ -547,8 +547,17 @@ describe("_unpredict (PNG Up predictor)", function()
     end)
 end)
 
-describe("PNG predictor filter family", function()
+describe("xref predictor filter family", function()
     local cases = {
+        {
+            name = "TIFF Sub",
+            predictor = 2,
+            rows = {
+                string.char(0, 0, 0, 0),
+                string.char(1, 255, 100, 156),
+                string.char(1, 255, 200, 56),
+            },
+        },
         {
             name = "Sub",
             predictor = 11,
@@ -582,7 +591,10 @@ describe("PNG predictor filter family", function()
         it("decodes the " .. case.name .. " filter", function()
             local predicted = {}
             for _, row in ipairs(case.rows) do
-                predicted[#predicted + 1] = string.char(case.predictor - 10) .. row
+                if case.predictor >= 10 then
+                    row = string.char(case.predictor - 10) .. row
+                end
+                predicted[#predicted + 1] = row
             end
             local compressed = rawDeflate(table.concat(predicted))
             local stream_obj = {

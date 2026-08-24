@@ -49,40 +49,19 @@ local function int_value(x)
     return 0
 end
 
---- Apply PNG Up predictor decoding (Predictor 12).
--- Strips filter bytes and reconstructs rows.
--- @param data string compressed data with filter bytes
--- @param params table with Columns and Predictor keys
--- @return string unpredicted data (columns bytes per row)
-local function _unpredict(data, params)
-    local predictor = params.Predictor or params["predictor"] or params["Predictor"]
-    if not predictor or predictor == 0 then
+local function inflate(data)
+    local ok, zlib = pcall(require, "adobe.util.zlib")
+    if not ok or not zlib or #data == 0 then
         return data
     end
-    local columns = params.Columns or params["columns"] or params["Columns"] or 1
-    if columns == 0 then
-        return data
-    end
-    local row_len = columns + 1
-    local buf = {}
-    local prev = string.rep("\0", columns)
-    for i = 0, #data - 1, row_len do
-        if i + row_len > #data then
-            break
-        end
-        local filter = data:byte(i + 1)
-        local row = data:sub(i + 2, i + row_len)
-        if filter == 2 then
-            local parts = {}
-            for j = 1, #row do
-                parts[j] = string.char((row:byte(j) + prev:byte(j)) % 256)
-            end
-            row = table.concat(parts)
-        end
-        buf[#buf + 1] = row
-        prev = row
-    end
-    return table.concat(buf)
+
+    local inflater = zlib.inflater()
+    local parts = {}
+    inflater:update(data, #data, function(ptr, len)
+        parts[#parts + 1] = ffi.string(ptr, len)
+    end)
+    inflater:close()
+    return parts[1] and table.concat(parts) or data
 end
 
 local function paeth(a, b, c)
@@ -96,21 +75,26 @@ local function paeth(a, b, c)
     return c
 end
 
---- Decode a PNG-predicted (Predictor >= 10) buffer: each row is prefixed
--- with a filter byte selecting None/Sub/Up/Average/Paeth reconstruction.
--- Handles the full PNG filter family; producers (qpdf, Acrobat Fast Web
--- View) routinely mix filters across rows.
-local function _unpredictPNG(data, columns)
-    local row_len = columns + 1
+--- Reverse TIFF or PNG prediction for byte-oriented xref rows.
+-- TIFF predictor 2 uses Sub without row filter bytes. PNG predictors
+-- 10–15 prefix every row with a filter byte selecting its algorithm.
+local function _unpredict(data, columns, predictor)
+    local png = predictor >= 10
+    local row_len = columns + (png and 1 or 0)
     local buf = {}
     local prev = string.rep("\0", columns)
     for i = 0, #data - 1, row_len do
         if i + row_len > #data then
             break
         end
-        local filter = data:byte(i + 1)
-        local row = data:sub(i + 2, i + row_len)
-        if filter == 1 then -- Sub: delta vs left neighbor (raw input)
+        local filter = 1
+        local row_start = i + 1
+        if png then
+            filter = data:byte(row_start)
+            row_start = row_start + 1
+        end
+        local row = data:sub(row_start, i + row_len)
+        if filter == 1 then -- Sub: delta vs left neighbor
             local out = {}
             for j = 1, #row do
                 local left = j > 1 and out[j - 1]:byte() or 0
@@ -123,7 +107,7 @@ local function _unpredictPNG(data, columns)
                 out[j] = string.char((row:byte(j) + prev:byte(j)) % 256)
             end
             row = table.concat(out)
-        elseif filter == 3 then -- Average: delta vs floor((left+up)/2) (raw input)
+        elseif filter == 3 then -- Average: delta vs floor((left+up)/2)
             local out = {}
             for j = 1, #row do
                 local left = j > 1 and out[j - 1]:byte() or 0
@@ -157,27 +141,24 @@ end
 -- @param entlen number W[1]+W[2]+W[3] entry length
 -- @return string unpredicted data
 local function _applyXRefPredictor(data, dic, entlen)
-    local parms = dic.DecodeParms or dic["decodeparms"] or dic["DecodeParms"]
+    local parms = dic.DecodeParms
     if type(parms) == "table" and parms[1] ~= nil and type(parms[1]) == "table" then
         -- Array of per-filter parameter dicts: use the first
         parms = parms[1]
     end
     local params = type(parms) == "table" and parms or dic
-    local predictor =
-        int_value(params.Predictor or params["predictor"] or params["Predictor"] or dic.Predictor or dic["predictor"] or dic["Predictor"])
-    if predictor == 0 then
+    local predictor = int_value(params.Predictor or dic.Predictor)
+    if predictor == 0 or predictor == 1 then
         return data
     end
-    local columns = int_value(params.Columns or params["columns"] or params["Columns"] or dic.Columns or dic["columns"] or dic["Columns"])
+    local columns = int_value(params.Columns or dic.Columns)
     if columns == 0 then
         columns = entlen
     end
-    if predictor >= 10 then
-        return _unpredictPNG(data, columns)
+    if predictor ~= 2 and predictor < 10 then
+        error("Unsupported xref predictor: " .. tostring(predictor))
     end
-    -- Predictor 2 (TIFF horizontal differencing) and legacy inline form:
-    -- the old decoder treats the data as PNG-Up rows; keep that behavior.
-    return _unpredict(data, { Predictor = predictor, Columns = columns })
+    return _unpredict(data, columns, predictor)
 end
 
 ------------------------------------------------------------------------
@@ -402,12 +383,12 @@ function PDFXRefStream:load_from_obj(obj)
         error("Expected PDFStream for xref stream")
     end
     local dic = obj.dic or {}
-    local streamType = name_str(dic.Type or dic["Type"] or dic["type"])
+    local streamType = name_str(dic.Type)
     if streamType ~= "XRef" then
         error("Invalid XRef stream: Type=" .. tostring(streamType))
     end
-    local size = int_value(dic.Size or dic["size"] or dic["Size"])
-    local indexRaw = dic.Index or dic["index"] or dic["Index"]
+    local size = int_value(dic.Size)
+    local indexRaw = dic.Index
     if indexRaw == nil then
         self.index = { { 0, size } }
     else
@@ -419,7 +400,7 @@ function PDFXRefStream:load_from_obj(obj)
             self.index[#self.index + 1] = { indexRaw[i], indexRaw[i + 1] }
         end
     end
-    local w_val = dic.W or dic["w"] or dic["W"]
+    local w_val = dic.W
     if type(w_val) ~= "table" then
         w_val = { w_val, w_val, w_val }
     end
@@ -427,24 +408,7 @@ function PDFXRefStream:load_from_obj(obj)
     self.fl2 = int_value(w_val[2])
     self.fl3 = int_value(w_val[3])
     self.entlen = self.fl1 + self.fl2 + self.fl3
-    local rawdata = obj.rawdata or ""
-    local ok, zlib_mod = pcall(require, "adobe.util.zlib")
-    if ok and zlib_mod and #rawdata > 0 then
-        local inflater = zlib_mod.inflater()
-        local parts = {}
-        inflater:update(rawdata, #rawdata, function(ptr, len)
-            parts[#parts + 1] = ffi.string(ptr, len)
-        end)
-        inflater:close()
-        local decompressed = (parts[1] and table.concat(parts) or nil)
-        if decompressed then
-            self.data = _applyXRefPredictor(decompressed, dic, self.entlen)
-        else
-            self.data = rawdata
-        end
-    else
-        self.data = rawdata
-    end
+    self.data = _applyXRefPredictor(inflate(obj.rawdata), dic, self.entlen)
 
     self.trailer = dic
 end
@@ -550,12 +514,12 @@ function PDFDocument:open(filepath)
         end
 
         -- Extract encryption info
-        if trailer.Encrypt or trailer["Encrypt"] then
-            local encryptRef = trailer.Encrypt or trailer["Encrypt"]
+        if trailer.Encrypt then
+            local encryptRef = trailer.Encrypt
             if type(encryptRef) == "table" and encryptRef.ref then
                 self.encrypt_objid = encryptRef.ref.objid
             end
-            local idList = trailer.ID or trailer["id"] or {}
+            local idList = trailer.ID or {}
             if type(idList) ~= "table" then
                 idList = { idList }
             end
@@ -578,8 +542,8 @@ function PDFDocument:open(filepath)
         end
 
         -- Extract root
-        if trailer.Root or trailer["Root"] then
-            self.root = trailer.Root or trailer["Root"]
+        if trailer.Root then
+            self.root = trailer.Root
             break
         end
 
@@ -617,6 +581,7 @@ function PDFDocument:_read_xref_from(start, xrefs)
 
     local _, token = p:nexttoken()
 
+    local xref
     if type(token) == "number" then
         -- XRef stream (PDF 1.5+): objid genno obj <stream>.
         local _, genno = p:nexttoken()
@@ -630,52 +595,37 @@ function PDFDocument:_read_xref_from(start, xrefs)
             error("Expected PDFStream for xref stream")
         end
 
-        local xref = PDFXRefStream:new()
+        xref = PDFXRefStream:new()
         xref:load_from_obj(stream_obj)
-        xrefs[#xrefs + 1] = xref
-
-        -- Follow Prev/XRefStm chains
-        local trailer = xref.trailer
-        if trailer then
-            if trailer.XRefStm or trailer["XRefStm"] then
-                local pos = int_value(trailer.XRefStm or trailer["XRefStm"])
-                self:_read_xref_from(pos, xrefs)
-            end
-            if trailer.Prev or trailer["Prev"] then
-                local pos = int_value(trailer.Prev or trailer["Prev"])
-                self:_read_xref_from(pos, xrefs)
-            end
-        end
     elseif is_keyword(token, "xref") then
-        -- Classic xref table
-        -- We need to skip past the "xref" line and read subsections.
-        -- Read raw bytes from the file to find end of "xref" line.
+        -- Classic xref table. Skip past the xref line before loading it.
         f:seek("set", start)
         local header = f:read(256) or ""
         local xref_end = header:find("\n", 1, true)
         if xref_end then
-            p:seek(start + xref_end) -- past the "xref\n" line
+            p:seek(start + xref_end)
         else
-            p:seek(start + 5) -- skip "xref\n"
+            p:seek(start + 5)
         end
-        local xref = PDFXRef:new()
+        xref = PDFXRef:new()
         xref:load(p)
-        xrefs[#xrefs + 1] = xref
-
-        -- Follow XRefStm/Prev chains
-        local trailer = xref.trailer
-        if trailer then
-            if trailer.XRefStm or trailer["XRefStm"] then
-                local pos = int_value(trailer.XRefStm or trailer["XRefStm"])
-                self:_read_xref_from(pos, xrefs)
-            end
-            if trailer.Prev or trailer["Prev"] then
-                local pos = int_value(trailer.Prev or trailer["Prev"])
-                self:_read_xref_from(pos, xrefs)
-            end
-        end
     else
         error("Invalid xref at offset " .. tostring(start))
+    end
+
+    xrefs[#xrefs + 1] = xref
+    local trailer = xref.trailer
+    if not trailer then
+        return
+    end
+
+    local xref_stm = int_value(trailer.XRefStm)
+    if xref_stm ~= 0 then
+        self:_read_xref_from(xref_stm, xrefs)
+    end
+    local prev = int_value(trailer.Prev)
+    if prev ~= 0 then
+        self:_read_xref_from(prev, xrefs)
     end
 end
 
@@ -750,7 +700,10 @@ end
 --   3. If it's a stream, set objid/genno on it
 --   4. If decipher is set, call decipher_all on non-stream objects
 --   5. Cache the result
-function PDFDocument:getobj(objid)
+--- Load and cache one indirect object.
+-- The Encrypt dictionary and its license references must be read before a
+-- decipher exists; every other caller requests transparent decryption.
+function PDFDocument:_loadObject(objid, decrypt)
     if self.objs[objid] then
         return self.objs[objid]
     end
@@ -767,92 +720,44 @@ function PDFDocument:getobj(objid)
         self:_expandObjStm(stmid)
         return self.objs[objid]
     end
-
     if not offset then
-        return nil -- object not found
-    end
-
-    -- Parse the object at that offset
-    local p = pdfparser.new(self.file)
-    p:seek(offset)
-
-    -- Read objid genno obj tokens
-    p:nexttoken()
-    local _, genno_tok = p:nexttoken()
-    p:nexttoken()
-
-    -- Now parse the actual object
-    local result = p:nextobject()
-    if not result then
         return nil
     end
 
-    local obj = result[2]
-    local real_genno = type(genno_tok) == "number" and genno_tok or 0
+    local p = pdfparser.new(self.file)
+    p:seek(offset)
+    p:nexttoken() -- objid
+    local _, genno = p:nexttoken()
+    p:nexttoken() -- obj
 
-    -- If it's a stream, upgrade to PDFStream and set objid/genno
-    if type(obj) == "table" and obj.dic ~= nil and obj.rawdata ~= nil then
-        -- Promote the raw table to a PDFStream instance so methods work
+    local obj = p:nextobject_value()
+    if obj == nil then
+        return nil
+    end
+
+    genno = type(genno) == "number" and genno or 0
+    if pdfparser.is_stream(obj) then
         setmetatable(obj, PDFStream)
-        obj:set_objid(objid, real_genno)
-        -- Attach decipher if the document has one
-        if self.decipher then
+        obj:set_objid(objid, genno)
+        if decrypt and self.decipher then
             obj.decipher = self.decipher
         end
-    elseif self.decipher then
-        -- Non-stream object: decrypt all string values
-        obj = pdfdoc.decipher_all(self.decipher, objid, real_genno, obj)
+    elseif decrypt and self.decipher then
+        obj = pdfdoc.decipher_all(self.decipher, objid, genno, obj)
     end
 
     self.objs[objid] = obj
     return obj
 end
 
---- Load an object without decryption (for reading the Encrypt dict itself).
--- The Encrypt dict must be read raw because its parameters tell us
--- HOW to decrypt everything else.
+--- Load an object with transparent decryption.
+function PDFDocument:getobj(objid)
+    return self:_loadObject(objid, true)
+end
+
+--- Load an object without decryption.
 function PDFDocument:_loadRawObject(objid)
-    if self.objs[objid] then
-        return self.objs[objid]
-    end
-
-    local offset, stmid
-    for _, xref in ipairs(self.xrefs) do
-        offset, _, stmid = xref:getpos(objid)
-        if offset or stmid then
-            break
-        end
-    end
-    if stmid then
-        self:_expandObjStm(stmid)
-        return self.objs[objid]
-    end
-    if not offset then
-        return nil
-    end
-
-    local p = pdfparser.new(self.file)
-    p:seek(offset)
-
-    -- Skip objid genno obj tokens
-    p:nexttoken() -- objid
-    p:nexttoken() -- genno
-    p:nexttoken() -- obj keyword
-
-    local result = p:nextobject()
-    if not result then
-        return nil
-    end
-
-    local obj = result[2]
-    -- If it's a stream, upgrade to PDFStream and set objid/genno
-    if type(obj) == "table" and obj.dic ~= nil and obj.rawdata ~= nil then
-        setmetatable(obj, PDFStream)
-        obj:set_objid(objid, 0)
-    end
-
-    self.objs[objid] = obj
-    return obj
+    return self:_loadObject(objid, false)
 end
 
 --- Expand a compressed object stream (ObjStm) and cache its child objects.
@@ -874,21 +779,10 @@ function PDFDocument:_expandObjStm(stmid)
         return
     end
 
-    local ok, zlib_mod = pcall(require, "adobe.util.zlib")
-    if ok and zlib_mod then
-        local inflater = zlib_mod.inflater()
-        local parts = {}
-        inflater:update(data, #data, function(ptr, len)
-            parts[#parts + 1] = ffi.string(ptr, len)
-        end)
-        inflater:close()
-        if parts[1] then
-            data = table.concat(parts)
-        end
-    end
+    data = inflate(data)
 
     -- Parse N (number of child objects) from the decompressed data
-    local n = tonumber(stm.dic.N or stm.dic["n"]) or 0
+    local n = tonumber(stm.dic.N) or 0
     if n == 0 then
         return
     end
@@ -993,11 +887,6 @@ function PDFDocument:_expandObjStm(stmid)
     self._expanded_stms[stmid] = true
 end
 
---- Old name for compatibility.
-function PDFDocument:loadObject(objid)
-    return self:getobj(objid)
-end
-
 --- Get all objids from all xref sections.
 function PDFDocument:allObjids()
     local seen = {}
@@ -1020,7 +909,7 @@ function PDFDocument:getEncryptionFilter()
         return nil
     end
     local param = self.encryption.param
-    local filter = param.Filter or param["filter"]
+    local filter = param.Filter
     if type(filter) == "table" and getmetatable(filter) == pdfparser.PSLiteral then
         return filter.name
     elseif type(filter) == "string" then
@@ -1036,14 +925,12 @@ function PDFDocument:extractAdeptLicense()
         return nil
     end
     local param = self.encryption.param
-    local adept_license = param.ADEPT_LICENSE or param["adept_license"]
+    local adept_license = param.ADEPT_LICENSE
     if type(adept_license) ~= "string" or #adept_license == 0 then
         return nil
     end
-    local ebx_bookid = param.EBX_BOOKID or param["ebx_bookid"]
-    if type(ebx_bookid) == "string" then
-        ebx_bookid = ebx_bookid
-    else
+    local ebx_bookid = param.EBX_BOOKID
+    if type(ebx_bookid) ~= "string" then
         ebx_bookid = nil
     end
     return adept_license, ebx_bookid

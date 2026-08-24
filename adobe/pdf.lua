@@ -44,13 +44,11 @@ local function extractRights(doc, encParam)
     -- Case 1: ADEPT_LICENSE is a direct string key in the dict
     if type(encParam.ADEPT_LICENSE) == "string" then
         adept_license = encParam.ADEPT_LICENSE
-    elseif type(encParam["adept_license"]) == "string" then
-        adept_license = encParam["adept_license"]
     end
 
     -- Case 2: ADEPT_LICENSE is an indirect reference — dereference it
     if not adept_license then
-        local licRef = encParam.ADEPT_LICENSE or encParam["adept_license"]
+        local licRef = encParam.ADEPT_LICENSE
         if type(licRef) == "table" and licRef.ref then
             local licObj = doc:_loadRawObject(licRef.ref.objid)
             if licObj then
@@ -158,7 +156,7 @@ local function extractEncryptedKey(rights)
                 if type(v) == "table" then
                     local text = v[1] or v._text
                     if type(text) == "string" then
-                        local keyType = v.keyType or v["keyType"] or "0"
+                        local keyType = v.keyType or "0"
                         return text, keyType
                     end
                 elseif type(v) == "string" then
@@ -172,7 +170,7 @@ local function extractEncryptedKey(rights)
             if type(ek) == "table" then
                 local text = ek[1] or ek._text
                 if type(text) == "string" then
-                    local keyType = ek.keyType or ek["keyType"] or "0"
+                    local keyType = ek.keyType or "0"
                     return text, keyType
                 end
             elseif type(ek) == "string" then
@@ -413,9 +411,9 @@ function pdf.decryptAdobePdf(inputPath, outputPath, bookKey, licenseKey, fulfill
     if type(encParam) == "table" and encParam.dic then
         encParam = encParam.dic
     end
-    local ebx_V = tonumber(encParam.V or encParam["v"] or 4)
-    local ebx_type = tonumber(encParam.EBX_ENCRYPTIONTYPE or encParam["ebx_encryptiontype"] or 6)
-    local length = math.floor(tonumber(encParam.Length or encParam["length"] or 128) / 8)
+    local ebx_V = tonumber(encParam.V or 4)
+    local ebx_type = tonumber(encParam.EBX_ENCRYPTIONTYPE or 6)
+    local length = math.floor(tonumber(encParam.Length or 128) / 8)
 
     logger.info("[ACSM] pdf: ebx_V=", ebx_V, "ebx_type=", ebx_type, "length=", length)
 

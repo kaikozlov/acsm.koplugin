@@ -169,19 +169,6 @@ describe("PDF decryption helpers", function()
             assert.is.truthy(rights, "extractRights failed: " .. tostring(err))
         end)
 
-        it("extracts from lowercase adept_license key", function()
-            local rightsXml = [[<?xml version="1.0"?><rights><key>val</key></rights>]]
-            local license = makeAdeptLicense(rightsXml)
-            local mockDoc = {
-                _loadRawObject = function()
-                    return nil
-                end,
-            }
-            local encParam = { adept_license = license }
-            local rights, err = pdf._extractRights(mockDoc, encParam)
-            assert.is.truthy(rights, "extractRights failed: " .. tostring(err))
-        end)
-
         it("returns error for missing ADEPT_LICENSE", function()
             local mockDoc = {
                 _loadRawObject = function()

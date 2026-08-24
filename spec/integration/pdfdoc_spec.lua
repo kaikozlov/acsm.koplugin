@@ -131,7 +131,7 @@ describe("PDFDocument", function()
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
 
-        local catalog = doc:loadObject(1)
+        local catalog = doc:getobj(1)
         assert.is_truthy(catalog, "object 1 (catalog) should load")
         -- Catalog should have Type=Catalog
         local typ = catalog.Type or catalog["type"]
@@ -179,7 +179,7 @@ describe("PDFDocument", function()
         local doc = pdfdoc.PDFDocument:new()
         doc:open(tmp)
 
-        local obj3 = doc:loadObject(3)
+        local obj3 = doc:getobj(3)
         assert.is_truthy(obj3, "object 3 should load")
 
         doc:close()
