@@ -600,7 +600,7 @@ describe("PNG predictor filter family", function()
             }
 
             local xref = pdfdoc.PDFXRefStream:new()
-            xref:load_from_obj(stream_obj, 0)
+            xref:load_from_obj(stream_obj)
             assert.equals(100, xref:getpos(1))
             assert.equals(200, xref:getpos(2))
         end)
@@ -705,6 +705,12 @@ describe("xref stream with /DecodeParms predictor (issue #21)", function()
         local ok, err = doc:open(tmp)
         assert.is_truthy(ok, "should open: " .. tostring(err))
 
+        -- The real parser must preserve nested dictionaries and indirect
+        -- references; a flat dictionary scanner cannot satisfy these checks.
+        local trailer = doc.xrefs[1].trailer
+        assert.equals(12, trailer.DecodeParms.Predictor)
+        assert.equals(2, trailer.Encrypt.ref.objid)
+
         -- Offsets must have decoded correctly (the actual issue-21 symptom:
         -- garbage offsets => /Encrypt unresolvable => "No /Encrypt dict in PDF")
         local obj1 = doc:getobj(1)
@@ -765,7 +771,7 @@ describe("PDFXRefStream", function()
             }
 
             local xref = pdfdoc.PDFXRefStream:new()
-            xref:load_from_obj(stream_obj, 0)
+            xref:load_from_obj(stream_obj)
 
             -- Verify positions
             local pos1, gen1 = xref:getpos(1)
@@ -802,7 +808,7 @@ describe("PDFXRefStream", function()
             }
 
             local xref = pdfdoc.PDFXRefStream:new()
-            xref:load_from_obj(stream_obj, 0)
+            xref:load_from_obj(stream_obj)
 
             local pos1, gen1 = xref:getpos(1)
             assert.equals(70000, pos1)
@@ -833,7 +839,7 @@ describe("PDFXRefStream", function()
             }
 
             local xref = pdfdoc.PDFXRefStream:new()
-            xref:load_from_obj(stream_obj, 0)
+            xref:load_from_obj(stream_obj)
 
             -- Type=2: returns nil pos, 0 genno, stmid, stindex
             local pos2, gen2, stmid, stindex = xref:getpos(2)
@@ -869,7 +875,7 @@ describe("PDFXRefStream", function()
             }
 
             local xref = pdfdoc.PDFXRefStream:new()
-            xref:load_from_obj(stream_obj, 0)
+            xref:load_from_obj(stream_obj)
 
             local pos5 = xref:getpos(5)
             assert.equals(100, pos5)
@@ -904,7 +910,7 @@ describe("PDFXRefStream", function()
             }
 
             local xref = pdfdoc.PDFXRefStream:new()
-            xref:load_from_obj(stream_obj, 0)
+            xref:load_from_obj(stream_obj)
 
             local pos1 = xref:getpos(1)
             assert.equals(10, pos1)
@@ -933,7 +939,7 @@ describe("PDFXRefStream", function()
             }
 
             local xref = pdfdoc.PDFXRefStream:new()
-            xref:load_from_obj(stream_obj, 0)
+            xref:load_from_obj(stream_obj)
 
             local ids = xref:objids()
             assert.equals(3, #ids)
