@@ -547,6 +547,193 @@ describe("_unpredict (PNG Up predictor)", function()
     end)
 end)
 
+describe("PNG predictor filter family", function()
+    local cases = {
+        {
+            name = "Sub",
+            predictor = 11,
+            rows = {
+                string.char(0, 0, 0, 0),
+                string.char(1, 255, 100, 156),
+                string.char(1, 255, 200, 56),
+            },
+        },
+        {
+            name = "Average",
+            predictor = 13,
+            rows = {
+                string.char(0, 0, 0, 0),
+                string.char(1, 0, 100, 206),
+                string.char(1, 0, 150, 156),
+            },
+        },
+        {
+            name = "Paeth",
+            predictor = 14,
+            rows = {
+                string.char(0, 0, 0, 0),
+                string.char(1, 255, 100, 156),
+                string.char(0, 0, 100, 156),
+            },
+        },
+    }
+
+    for _, case in ipairs(cases) do
+        it("decodes the " .. case.name .. " filter", function()
+            local predicted = {}
+            for _, row in ipairs(case.rows) do
+                predicted[#predicted + 1] = string.char(case.predictor - 10) .. row
+            end
+            local compressed = rawDeflate(table.concat(predicted))
+            local stream_obj = {
+                dic = {
+                    Type = pdfparser.literal("XRef"),
+                    Size = 3,
+                    W = { 1, 2, 1 },
+                    Filter = pdfparser.literal("FlateDecode"),
+                    DecodeParms = {
+                        Predictor = case.predictor,
+                        Columns = 4,
+                    },
+                },
+                rawdata = compressed,
+            }
+
+            local xref = pdfdoc.PDFXRefStream:new()
+            xref:load_from_obj(stream_obj, 0)
+            assert.equals(100, xref:getpos(1))
+            assert.equals(200, xref:getpos(2))
+        end)
+    end
+end)
+
+------------------------------------------------------------------------
+-- XRef stream with /DecodeParms predictor (issue #21)
+--
+-- Real-world hypercompressed PDFs (e.g. Cantook/deMarque library loans)
+-- put /Predictor and /Columns inside /DecodeParms per PDF 32000-1 7.4.4.3:
+--   <</Type/XRef .../W[1 4 1]/DecodeParms<</Columns 6/Predictor 12>>/Filter/FlateDecode>>
+-- The parser must apply the Up predictor from DecodeParms, or every object
+-- offset decodes as garbage and the /Encrypt dict can never be resolved.
+------------------------------------------------------------------------
+
+describe("xref stream with /DecodeParms predictor (issue #21)", function()
+    local function upPredict(data, columns)
+        -- PNG Up encoding: filter byte 2, then delta vs previous row
+        local rows = {}
+        local prev = string.rep("\0", columns)
+        for i = 1, #data, columns do
+            local row = data:sub(i, i + columns - 1)
+            local delta = ""
+            for j = 1, #row do
+                delta = delta .. string.char((row:byte(j) - prev:byte(j)) % 256)
+            end
+            rows[#rows + 1] = "\x02" .. delta
+            prev = row
+        end
+        return table.concat(rows)
+    end
+
+    local function buildIssue21Pdf(dict_style)
+        -- Objects: 0 free, 1 Catalog, 2 Encrypt (EBX_HANDLER), 3 xref stream, 4 free
+        local offsets = {}
+
+        local tmp = os.tmpname()
+        local f = io.open(tmp, "wb")
+        f:write("%PDF-1.5\n")
+        f:write(string.char(0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A))
+
+        offsets[1] = f:seek()
+        f:write("1 0 obj\n<< /Type /Catalog >>\nendobj\n")
+
+        offsets[2] = f:seek()
+        f:write("2 0 obj\n<</Filter/EBX_HANDLER/Length 128/V 4/EBX_PUBLISHER(Publisher)/EBX_TITLE(Title)/EBX_AUTHOR(Author)>>\nendobj\n")
+
+        offsets[4] = f:seek() -- marker; object 4 stays free/unwritten
+
+        -- XRef stream (object 3), W=[1 4 1] => entlen=6, Columns=6
+        offsets[3] = f:seek()
+
+        local entries = {}
+        -- obj 0: free
+        entries[1] = "\x00" .. "\x00\x00\x00\x00" .. "\x00"
+        -- obj 1..3: type 1, 4-byte offset, gen 0
+        for _, id in ipairs({ 1, 2, 3 }) do
+            local off = offsets[id]
+            entries[#entries + 1] = "\x01"
+                .. string.char(math.floor(off / 0x1000000) % 0x100, math.floor(off / 0x10000) % 0x100, math.floor(off / 0x100) % 0x100, off % 0x100)
+                .. "\x00"
+        end
+        -- obj 4: free
+        entries[#entries + 1] = "\x00" .. "\x00\x00\x00\x00" .. "\x00"
+        local raw = table.concat(entries)
+
+        local compressed = rawDeflate(upPredict(raw, 6))
+
+        -- dict_style "decodeparms" mirrors the issue's serialization exactly
+        -- (Predictor/Columns nested in DecodeParms); "inline" keeps the
+        -- non-standard top-level form some producers emit.
+        local parms
+        if dict_style == "decodeparms" then
+            parms = "/DecodeParms<</Columns 6/Predictor 12>>"
+        else
+            parms = "/Predictor 12 /Columns 6"
+        end
+
+        f:write(
+            string.format(
+                "3 0 obj\n<</Length %d/Type/XRef/Root 1 0 R/Encrypt 2 0 R/Size 5/Index[0 5]/W[1 4 1]%s/Filter/FlateDecode>>\nstream\r\n",
+                #compressed,
+                parms
+            )
+        )
+        f:write(compressed)
+        f:write("\r\nendstream\nendobj\n")
+
+        f:write(string.format("startxref\n%d\n%%%%EOF\n", offsets[3]))
+        f:close()
+        return tmp
+    end
+
+    it("resolves /Encrypt when predictor is inside /DecodeParms", function()
+        local tmp = buildIssue21Pdf("decodeparms")
+        finally(function()
+            os.remove(tmp)
+        end)
+
+        local doc = pdfdoc.PDFDocument:new()
+        local ok, err = doc:open(tmp)
+        assert.is_truthy(ok, "should open: " .. tostring(err))
+
+        -- Offsets must have decoded correctly (the actual issue-21 symptom:
+        -- garbage offsets => /Encrypt unresolvable => "No /Encrypt dict in PDF")
+        local obj1 = doc:getobj(1)
+        assert.is_truthy(obj1, "object 1 should resolve through predicted xref stream")
+        assert.is_truthy(obj1.Type and obj1.Type.name == "Catalog", "object 1 should be the Catalog")
+
+        assert.is_truthy(doc.encryption, "encryption info should be collected from trailer")
+        assert.is_truthy(doc.encryption.param, "/Encrypt dict should resolve")
+        assert.equals("EBX_HANDLER", doc:getEncryptionFilter())
+
+        doc:close()
+    end)
+
+    it("still parses non-standard top-level /Predictor (backward compat)", function()
+        local tmp = buildIssue21Pdf("inline")
+        finally(function()
+            os.remove(tmp)
+        end)
+
+        local doc = pdfdoc.PDFDocument:new()
+        local ok, err = doc:open(tmp)
+        assert.is_truthy(ok, "should open: " .. tostring(err))
+        assert.is_truthy(doc:getobj(1), "object 1 should resolve")
+        assert.equals("EBX_HANDLER", doc:getEncryptionFilter())
+
+        doc:close()
+    end)
+end)
+
 ------------------------------------------------------------------------
 -- PDFXRefStream tests
 ------------------------------------------------------------------------

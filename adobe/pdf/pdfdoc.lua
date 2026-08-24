@@ -85,6 +85,101 @@ local function _unpredict(data, params)
     return table.concat(buf)
 end
 
+local function paeth(a, b, c)
+    local p = a + b - c
+    local pa, pb, pc = math.abs(p - a), math.abs(p - b), math.abs(p - c)
+    if pa <= pb and pa <= pc then
+        return a
+    elseif pb <= pc then
+        return b
+    end
+    return c
+end
+
+--- Decode a PNG-predicted (Predictor >= 10) buffer: each row is prefixed
+-- with a filter byte selecting None/Sub/Up/Average/Paeth reconstruction.
+-- Handles the full PNG filter family; producers (qpdf, Acrobat Fast Web
+-- View) routinely mix filters across rows.
+local function _unpredictPNG(data, columns)
+    local row_len = columns + 1
+    local buf = {}
+    local prev = string.rep("\0", columns)
+    for i = 0, #data - 1, row_len do
+        if i + row_len > #data then
+            break
+        end
+        local filter = data:byte(i + 1)
+        local row = data:sub(i + 2, i + row_len)
+        if filter == 1 then -- Sub: delta vs left neighbor (raw input)
+            local out = {}
+            for j = 1, #row do
+                local left = j > 1 and out[j - 1]:byte() or 0
+                out[j] = string.char((row:byte(j) + left) % 256)
+            end
+            row = table.concat(out)
+        elseif filter == 2 then -- Up: delta vs previous row
+            local out = {}
+            for j = 1, #row do
+                out[j] = string.char((row:byte(j) + prev:byte(j)) % 256)
+            end
+            row = table.concat(out)
+        elseif filter == 3 then -- Average: delta vs floor((left+up)/2) (raw input)
+            local out = {}
+            for j = 1, #row do
+                local left = j > 1 and out[j - 1]:byte() or 0
+                out[j] = string.char((row:byte(j) + math.floor((left + prev:byte(j)) / 2)) % 256)
+            end
+            row = table.concat(out)
+        elseif filter == 4 then -- Paeth
+            local out = {}
+            for j = 1, #row do
+                local left = j > 1 and out[j - 1]:byte() or 0
+                local up = prev:byte(j)
+                local upleft = j > 1 and prev:byte(j - 1) or 0
+                out[j] = string.char((row:byte(j) + paeth(left, up, upleft)) % 256)
+            end
+            row = table.concat(out)
+        end
+        -- filter 0 (None): row is already raw
+        buf[#buf + 1] = row
+        prev = row
+    end
+    return table.concat(buf)
+end
+
+--- Resolve predictor parameters for an xref stream and unpredict its data.
+-- Per PDF 32000-1 7.4.4.3, /Predictor and /Columns live inside /DecodeParms
+-- (a dict, or an array of dicts when the stream has multiple filters).
+-- Some producers inline them at the top level of the stream dict instead —
+-- accept both. Columns defaults to the W-array entry length.
+-- @param data string inflated xref stream data
+-- @param dic table the xref stream's dictionary
+-- @param entlen number W[1]+W[2]+W[3] entry length
+-- @return string unpredicted data
+local function _applyXRefPredictor(data, dic, entlen)
+    local parms = dic.DecodeParms or dic["decodeparms"] or dic["DecodeParms"]
+    if type(parms) == "table" and parms[1] ~= nil and type(parms[1]) == "table" then
+        -- Array of per-filter parameter dicts: use the first
+        parms = parms[1]
+    end
+    local params = type(parms) == "table" and parms or dic
+    local predictor =
+        int_value(params.Predictor or params["predictor"] or params["Predictor"] or dic.Predictor or dic["predictor"] or dic["Predictor"])
+    if predictor == 0 then
+        return data
+    end
+    local columns = int_value(params.Columns or params["columns"] or params["Columns"] or dic.Columns or dic["columns"] or dic["Columns"])
+    if columns == 0 then
+        columns = entlen
+    end
+    if predictor >= 10 then
+        return _unpredictPNG(data, columns)
+    end
+    -- Predictor 2 (TIFF horizontal differencing) and legacy inline form:
+    -- the old decoder treats the data as PNG-Up rows; keep that behavior.
+    return _unpredict(data, { Predictor = predictor, Columns = columns })
+end
+
 ------------------------------------------------------------------------
 -- PDFStream
 ------------------------------------------------------------------------
@@ -304,7 +399,9 @@ end
 function PDFXRefStream:load(p)
     -- The stream object follows the objid/genno/obj tokens
     -- It's already been positioned by the caller
-    local _, obj = p:nextobject()
+    local result = p:nextobject()
+    -- nextobject returns a single {pos, value} table — unwrap it
+    local obj = type(result) == "table" and result[2] or nil
     if type(obj) ~= "table" or not obj.rawdata then
         error("Expected PDFStream for xref stream")
     end
@@ -351,21 +448,7 @@ function PDFXRefStream:load(p)
         inflater:close()
         local decompressed = (parts[1] and table.concat(parts) or nil)
         if decompressed then
-            -- Predictor 12 may be inlined from DecodeParms. Columns may be missing;
-            -- derive from W array (= fl1+fl2+fl3 = entlen)
-            local has_predictor = int_value(dic.Predictor or dic["predictor"] or dic["Predictor"])
-            if has_predictor ~= 0 then
-                local params = dic
-                if not params.Columns and not params["columns"] then
-                    params = {}
-                    for k, v in pairs(dic) do
-                        params[k] = v
-                    end
-                    params.Columns = params.Columns or params["columns"] or self.entlen
-                end
-                decompressed = _unpredict(decompressed, params)
-            end
-            self.data = decompressed
+            self.data = _applyXRefPredictor(decompressed, dic, self.entlen)
         else
             self.data = rawdata
         end
@@ -418,21 +501,7 @@ function PDFXRefStream:load_from_obj(obj, start)
         inflater:close()
         local decompressed = (parts[1] and table.concat(parts) or nil)
         if decompressed then
-            -- Predictor 12 may be inlined from DecodeParms. Columns may be missing;
-            -- derive from W array (= fl1+fl2+fl3 = entlen)
-            local has_predictor = int_value(dic.Predictor or dic["predictor"] or dic["Predictor"])
-            if has_predictor ~= 0 then
-                local params = dic
-                if not params.Columns and not params["columns"] then
-                    params = {}
-                    for k, v in pairs(dic) do
-                        params[k] = v
-                    end
-                    params.Columns = params.Columns or params["columns"] or self.entlen
-                end
-                decompressed = _unpredict(decompressed, params)
-            end
-            self.data = decompressed
+            self.data = _applyXRefPredictor(decompressed, dic, self.entlen)
         else
             self.data = rawdata
         end
@@ -458,6 +527,11 @@ function PDFXRefStream:getpos(objid)
     for _, idx in ipairs(self.index) do
         local first, size = idx[1], idx[2]
         if first <= objid and objid < first + size then
+            if not self.data or self.entlen == 0 then
+                -- xref data failed to decode (bad predictor/unpredict) —
+                -- an offset read from garbage would silently misparse objects
+                return nil
+            end
             local i = self.entlen * ((objid - first) + offset)
             if i + self.entlen > #self.data then
                 return nil
@@ -467,6 +541,11 @@ function PDFXRefStream:getpos(objid)
             if f1 == 1 then
                 -- Object at offset
                 local pos = nunpack(ent:sub(self.fl1 + 1, self.fl1 + self.fl2))
+                if pos == 0 then
+                    -- Offset 0 is never a valid object start (that is the
+                    -- %PDF header); signals garbage-decoded offsets.
+                    return nil
+                end
                 return pos, 0
             elseif f1 == 2 then
                 -- Object in ObjStm
@@ -603,20 +682,22 @@ function PDFDocument:_read_xref_from(start, xrefs)
 
     if type(token) == "number" then
         -- XRef stream (PDF 1.5+): starts with objid
-        f:seek("set", start)
+        -- parser.new() seeks to 0; re-seek to the xref stream's offset
         p = pdfparser.new(f)
+        p:seek(start)
         local xref = PDFXRefStream:new()
         -- Read objid genno obj tokens then the stream
         p:nexttoken() -- objid (number)
         p:nexttoken() -- genno (number)
         p:nexttoken() -- "obj" keyword
-        -- Now read the stream object
-        local _, stream_obj = p:nextobject()
-        -- Build a pseudo-stream with raw data
-        -- We need to read the raw bytes between "stream\n" and "\nendstream"
-        -- Build a pseudo-stream with raw data.
-        -- If nextobject gave us a dict, extract rawdata.
-        -- If it failed (nested <<>> in DecodeParms etc.), parse manually.
+        -- Now read the stream object.
+        -- nextobject returns a single {pos, value} table — unwrap it.
+        local result = p:nextobject()
+        local stream_obj = type(result) == "table" and result[2] or nil
+        -- If the tokenizer gave us a proper stream (dic + rawdata), use it
+        -- directly — it handles nested dicts (DecodeParms etc.) correctly.
+        -- Fallback: parse raw PDF text ourselves (for tokenizers/parsers that
+        -- failed, e.g. legacy files the tokenizer chokes on).
         if type(stream_obj) ~= "table" or stream_obj.ref or not stream_obj.dic then
             -- Fallback: parse raw PDF text ourselves
             f:seek("set", start)
@@ -641,7 +722,7 @@ function PDFDocument:_read_xref_from(start, xrefs)
                         -- Manual PDF dict parser for flat key-value pairs
                         local dictRaw = content:sub(dictStart + 2, streamMarker - 1)
                         local function parseDict(raw)
-                            local result = {}
+                            local parsed = {}
                             local pp = 1
                             while pp <= #raw do
                                 while pp <= #raw do
@@ -667,7 +748,10 @@ function PDFDocument:_read_xref_from(start, xrefs)
                                         end
                                         pp = pp + 1
                                     end
-                                    local key = raw:sub(keyStart, pp - 1):lower()
+                                    local key = raw:sub(keyStart, pp - 1)
+                                    -- PDF names are case-sensitive; keep original
+                                    -- case so trailer readers (Encrypt/Root/Prev)
+                                    -- can find these keys
                                     while pp <= #raw do
                                         local b = raw:byte(pp)
                                         if b ~= 32 and b ~= 10 and b ~= 13 and b ~= 9 and b ~= 12 then
@@ -685,7 +769,7 @@ function PDFDocument:_read_xref_from(start, xrefs)
                                             end
                                             pp = pp + 1
                                         end
-                                        result[key] = tonumber(raw:sub(valStart, pp - 1)) or raw:sub(valStart, pp - 1)
+                                        parsed[key] = tonumber(raw:sub(valStart, pp - 1)) or raw:sub(valStart, pp - 1)
                                     elseif b == 47 then
                                         pp = pp + 1
                                         local valStart = pp
@@ -696,7 +780,7 @@ function PDFDocument:_read_xref_from(start, xrefs)
                                             end
                                             pp = pp + 1
                                         end
-                                        result[key] = raw:sub(valStart, pp - 1)
+                                        parsed[key] = raw:sub(valStart, pp - 1)
                                     elseif b == 91 then
                                         local arrStart = pp + 1
                                         local depth = 1
@@ -718,7 +802,7 @@ function PDFDocument:_read_xref_from(start, xrefs)
                                                 arr[#arr + 1] = v
                                             end
                                         end
-                                        result[key] = arr
+                                        parsed[key] = arr
                                     else
                                         while pp <= #raw do
                                             b = raw:byte(pp)
@@ -732,7 +816,7 @@ function PDFDocument:_read_xref_from(start, xrefs)
                                     pp = pp + 1
                                 end
                             end
-                            return result
+                            return parsed
                         end
                         stream_obj.dic = parseDict(dictRaw)
                     end
