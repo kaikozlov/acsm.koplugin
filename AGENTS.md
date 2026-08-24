@@ -39,7 +39,7 @@ All specs live under `spec/` and run together via `busted-koreader`:
 | `spec/*_spec.lua` | Module-level tests (epub, naming, fulfillment) | Real KOReader libs, real crypto |
 | `spec/integration/*_spec.lua` | Cross-module tests (lifecycle, flows, DOM, crypto round-trips) | Real KOReader libs, real crypto |
 | `spec/integration/pdf_e2e_spec.lua` | Full activation → fulfillment → PDF decrypt (Daisy Miller) | Tagged `#e2e`, requires network |
-| `spec/integration/sample_library_e2e_spec.lua` | Full library sweep: activation → fulfillment → decrypt for every ACSM sample in `REFERENCE/test_books/adobe_sample.md` | Tagged `#e2e`, ~90 s, ~15 MB of downloads |
+| `spec/integration/sample_library_e2e_spec.lua` | Full library sweep: activation → fulfillment → decrypt for 26 public ACSM samples | Tagged `#e2e`, ~90 s, ~15 MB of downloads |
 
 The only tag in use is `#e2e` — `just test` excludes it because it hits
 Adobe's servers and needs network access.
@@ -61,12 +61,12 @@ The test uses Adobe's smallest free sample ("God Is A Salesman" chapter 1,
 (PK zip header) and that decryption produced >0 entries.
 
 `spec/integration/sample_library_e2e_spec.lua` runs the same pipeline across
-**every ACSM sample** listed in `REFERENCE/test_books/adobe_sample.md`
-(26 books, both formats, multiple publishers). It parses the catalog at load
-time, shares one anonymous activation across all books, and asserts each
-output's format from magic bytes — not the catalog's declared format, which
-is stale for at least one sample (Der Schimmelreiter is listed as EPUB but
-ships as PDF).
+26 public ACSM samples (both formats, multiple publishers). Its validated
+resource IDs are embedded so tracked tests never depend on the intentionally
+untracked `REFERENCE/` directory. It shares one anonymous activation across
+all books and asserts each output's format from magic bytes — not catalog
+metadata, which is stale for at least one sample (Der Schimmelreiter is listed
+as EPUB but ships as PDF).
 
 ```bash
 just test-e2e   # must have network; uses --network=host
