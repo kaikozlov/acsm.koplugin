@@ -19,7 +19,7 @@ local function sha256_bin(data)
     return sha2.hex2bin(sha2.sha256(data))
 end
 
-local function unpadPkcs7(data)
+function pdfcrypt.unpadPkcs7(data)
     local padLen = #data > 0 and data:byte(#data) or nil
     if not padLen or padLen < 1 or padLen > 16 or padLen > #data then
         return nil, "Invalid PKCS#7 padding"
@@ -172,7 +172,7 @@ function pdfcrypt.removeHardening(bookKey, keyType, resourceUUID, deviceUUID, fu
     if not decrypted then
         return nil, decryptErr
     end
-    return unpadPkcs7(decrypted)
+    return pdfcrypt.unpadPkcs7(decrypted)
 end
 
 return pdfcrypt

@@ -3,7 +3,6 @@ local fulfillment = {}
 local DataStorage = require("datastorage")
 local http = require("socket.http")
 local lfs = require("libs/libkoreader-lfs")
-local ltn12 = require("ltn12")
 local logger = require("logger")
 local socket = require("socket")
 local socketutil = require("socketutil")
@@ -16,7 +15,6 @@ local dom = require("adobe.util.dom")
 local epub = require("adobe.epub")
 local nativecrypto = require("adobe.util.nativecrypto")
 local util = require("adobe.util.util")
-local xml = require("adobe.util.xml")
 
 local ADEPT = adobehash.ADEPT
 
@@ -37,61 +35,6 @@ local function uniqueCachePath(prefix, suffix)
     local f = io.open(fallback, "w")
     if f then
         f:close()
-    end
-    return fallback
-end
-
-local function requestToString(request)
-    local sink, resp = socketutil.table_sink({})
-    request.sink = sink
-    request.headers = request.headers or {}
-    request.headers["User-Agent"] = request.headers["User-Agent"] or socketutil.USER_AGENT
-
-    socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
-    local ok, code = pcall(function()
-        return socket.skip(1, http.request(request))
-    end)
-    socketutil:reset_timeout()
-    if not ok then
-        return nil, code
-    end
-    local body = table.concat(resp)
-    if body == "" and not code then
-        return nil, "request failed"
-    end
-    return body, code
-end
-
-local function adeptPost(endpoint, body)
-    return requestToString({
-        url = endpoint,
-        method = "POST",
-        headers = {
-            ["Content-Type"] = "application/vnd.adobe.adept+xml",
-            ["Content-Length"] = tostring(#body),
-        },
-        source = ltn12.source.string(body),
-    })
-end
-
-local function deserializeXml(body, context)
-    local ok, parsed = pcall(xml.deserialize, body)
-    if not ok then
-        return nil, context .. " returned malformed XML: " .. tostring(parsed)
-    end
-    if type(parsed) ~= "table" then
-        return nil, context .. " returned an invalid XML document"
-    end
-    return parsed
-end
-
-local function xmlError(parsed, fallback)
-    local err = parsed and parsed.error
-    if type(err) == "table" and err._attr and err._attr.data then
-        return err._attr.data
-    end
-    if type(err) == "string" then
-        return err
     end
     return fallback
 end
@@ -129,6 +72,35 @@ local function signXmlBody(xmlString, signingKey)
     return util.base64.encode(signature)
 end
 
+local function readAcsm(acsmPath)
+    local content = koutil.readFromFile(acsmPath, "rb")
+    if not content then
+        return nil, "Cannot open ACSM file: " .. tostring(acsmPath)
+    end
+
+    local parsed, parseErr = adobe.deserializeResponse(content, "ACSM")
+    if not parsed then
+        return nil, parseErr
+    end
+    local token = parsed.fulfillmentToken
+    if type(token) ~= "table" then
+        return nil, "No fulfillmentToken in ACSM"
+    end
+
+    local operatorURL = token.operatorURL
+    if type(operatorURL) == "table" then
+        operatorURL = operatorURL[1]
+    end
+    if not operatorURL then
+        return nil, "No operatorURL in ACSM"
+    end
+
+    return {
+        content = content,
+        operatorURL = operatorURL,
+    }
+end
+
 function fulfillment.extractCertFromPKCS12(pkcs12B64, deviceKey)
     local pass = util.base64.encode(deviceKey.key)
     local decoded, err = nativecrypto.parse_pkcs12(util.base64.decode(pkcs12B64), pass)
@@ -149,19 +121,19 @@ function fulfillment.operatorAuth(operatorURL, userUUID, userCert, licenseCert, 
     body = body .. "</adept:credentials>"
 
     logger.info("[ACSM] Operator auth:", authURL)
-    local resp, err = adeptPost(authURL, body)
+    local resp, err = adobe.adeptPost(authURL, body, true)
     if not resp then
         return nil, "Operator auth failed: " .. tostring(err)
     end
     if resp == "" then
         return nil, "Operator auth failed: empty response"
     end
-    local parsed, parseErr = deserializeXml(resp, "Operator auth")
+    local parsed, parseErr = adobe.deserializeResponse(resp, "Operator auth")
     if not parsed then
         return nil, "Operator auth failed: " .. parseErr
     end
     if parsed.error then
-        return nil, "Operator auth failed: " .. xmlError(parsed, resp)
+        return nil, "Operator auth failed: " .. adobe.serverError(parsed, resp)
     end
     if parsed.success == nil then
         return nil, "Operator auth failed: unexpected response"
@@ -191,19 +163,19 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
 
     local initURL = activationURL:gsub("/+$", "") .. "/InitLicenseService"
     logger.info("[ACSM] InitLicenseService:", initURL)
-    local resp, err = adeptPost(initURL, body)
+    local resp, err = adobe.adeptPost(initURL, body, true)
     if not resp then
         return nil, "InitLicenseService failed: " .. tostring(err)
     end
     if resp == "" then
         return nil, "InitLicenseService failed: empty response"
     end
-    local parsed, parseErr = deserializeXml(resp, "InitLicenseService")
+    local parsed, parseErr = adobe.deserializeResponse(resp, "InitLicenseService")
     if not parsed then
         return nil, parseErr
     end
     if parsed.error then
-        return nil, "InitLicenseService error: " .. xmlError(parsed, resp)
+        return nil, "InitLicenseService error: " .. adobe.serverError(parsed, resp)
     end
     if parsed.success == nil then
         return nil, "InitLicenseService failed: unexpected response"
@@ -211,28 +183,16 @@ function fulfillment.initLicenseService(activationURL, operatorURL, userUUID, si
     return true
 end
 
-function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signingKey)
-    local acsmContent = koutil.readFromFile(acsmPath, "rb")
-    if not acsmContent then
-        return nil, "Cannot open ACSM file: " .. tostring(acsmPath)
+function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signingKey, acsm)
+    if not acsm then
+        local err
+        acsm, err = readAcsm(acsmPath)
+        if not acsm then
+            return nil, err
+        end
     end
-
-    local acsmParsed, parseErr = deserializeXml(acsmContent, "ACSM")
-    if not acsmParsed then
-        return nil, parseErr
-    end
-    local token = acsmParsed.fulfillmentToken
-    if not token then
-        return nil, "No fulfillmentToken in ACSM"
-    end
-
-    local operatorURL = token.operatorURL
-    if type(operatorURL) == "table" then
-        operatorURL = operatorURL[1]
-    end
-    if not operatorURL then
-        return nil, "No operatorURL in ACSM"
-    end
+    local acsmContent = acsm.content
+    local operatorURL = acsm.operatorURL
 
     local acsmXml = acsmContent:gsub("^<%?xml[^?]*%?>%s*", ""):gsub("%s+$", "")
     local body = '<?xml version="1.0"?>'
@@ -265,17 +225,17 @@ function fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, signin
     local fulfillURL = operatorURL:gsub("/+$", "") .. "/Fulfill"
     logger.info("[ACSM] Fulfill:", fulfillURL)
 
-    local resp, code = adeptPost(fulfillURL, body)
+    local resp, code = adobe.adeptPost(fulfillURL, body, true)
     if not resp or resp == "" then
         return nil, "Fulfill request failed: " .. tostring(code)
     end
 
-    local parsed, responseParseErr = deserializeXml(resp, "Fulfill")
+    local parsed, responseParseErr = adobe.deserializeResponse(resp, "Fulfill")
     if not parsed then
         return nil, responseParseErr
     end
     if parsed.error then
-        return nil, "Fulfill error: " .. xmlError(parsed, resp)
+        return nil, "Fulfill error: " .. adobe.serverError(parsed, resp)
     end
 
     local root = dom.parse(resp)
@@ -371,7 +331,7 @@ function fulfillment.notify(notifyURL, userUUID, deviceUUID, signingKey)
     body = body .. "</adept:notification>"
 
     logger.info("[ACSM] Notify:", notifyURL)
-    local response, err = adeptPost(notifyURL, body)
+    local response, err = adobe.adeptPost(notifyURL, body, true)
     if not response then
         return nil, err
     end
@@ -395,25 +355,11 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     logger.info("[ACSM] fulfillment.process: got user cert")
 
     logger.info("[ACSM] fulfillment.process: reading ACSM file...")
-    local acsmContent = koutil.readFromFile(acsmPath, "rb")
-    if not acsmContent then
-        return nil, "Cannot open ACSM file: " .. tostring(acsmPath)
+    local acsm, acsmErr = readAcsm(acsmPath)
+    if not acsm then
+        return nil, acsmErr
     end
-    local acsmParsed, acsmParseErr = deserializeXml(acsmContent, "ACSM")
-    if not acsmParsed then
-        return nil, acsmParseErr
-    end
-    local token = acsmParsed.fulfillmentToken
-    if type(token) ~= "table" then
-        return nil, "No fulfillmentToken in ACSM"
-    end
-    local operatorURL = token.operatorURL
-    if type(operatorURL) == "table" then
-        operatorURL = operatorURL[1]
-    end
-    if not operatorURL then
-        return nil, "No operatorURL in ACSM"
-    end
+    local operatorURL = acsm.operatorURL
     logger.info("[ACSM] fulfillment.process: operatorURL=", operatorURL)
 
     logger.info("[ACSM] fulfillment.process: decoding pkcs12...")
@@ -423,7 +369,7 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     end
     local activationURL = creds.activationURL or "https://adeactivate.adobe.com/adept"
     if not creds.activationURL and creds.activationXml then
-        local activationParsed, activationParseErr = deserializeXml(creds.activationXml, "Saved activation")
+        local activationParsed, activationParseErr = adobe.deserializeResponse(creds.activationXml, "Saved activation")
         if not activationParsed then
             return nil, activationParseErr
         end
@@ -451,14 +397,14 @@ function fulfillment.process(acsmPath, outputPath, creds, deviceUUID, fingerprin
     logger.info("[ACSM] fulfillment.process: license service initialized, fulfilling...")
 
     local result
-    result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
+    result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key, acsm)
     if err and err:find("E_ADEPT_DISTRIBUTOR_AUTH") then
         logger.info("[ACSM] fulfillment.process: got DISTRIBUTOR_AUTH error, retrying operator auth...")
         local authOk, authErr = fulfillment.operatorAuth(operatorURL, userUUID, userCert, creds.licenseCert, authCert)
         if not authOk then
             return nil, authErr
         end
-        result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key)
+        result, err = fulfillment.fulfill(acsmPath, userUUID, deviceUUID, fingerprint, pkcs12Key, acsm)
     end
     if err then
         return nil, err

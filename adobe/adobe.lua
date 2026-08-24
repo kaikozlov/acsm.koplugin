@@ -40,7 +40,7 @@ adobe.VERSIONS = {
 -- default to 2.0.1
 adobe.VERSION = adobe.VERSIONS[2]
 
-local function requestToString(request)
+function adobe.requestToString(request, allow_error_response)
     local sink, resp = socketutil.table_sink({})
     request.sink = sink
     request.headers = request.headers or {}
@@ -56,19 +56,27 @@ local function requestToString(request)
         logger.info("[ACSM] HTTP request failed with exception:", code)
         return nil, tostring(code)
     end
+
     local body = table.concat(resp)
-    if type(code) == "number" and (code < 200 or code >= 300) then
-        return nil, "HTTP " .. tostring(code) .. (body ~= "" and (": " .. body) or "")
+    if allow_error_response then
+        if body == "" and not code then
+            return nil, "request failed"
+        end
+    else
+        if type(code) == "number" and (code < 200 or code >= 300) then
+            return nil, "HTTP " .. tostring(code) .. (body ~= "" and (": " .. body) or "")
+        end
+        if body == "" then
+            logger.info("[ACSM] HTTP request returned an empty body, status=", code)
+            return nil, "Empty HTTP response" .. (code and (" (status " .. tostring(code) .. ")") or "")
+        end
     end
-    if body == "" then
-        logger.info("[ACSM] HTTP request returned an empty body, status=", code)
-        return nil, "Empty HTTP response" .. (code and (" (status " .. tostring(code) .. ")") or "")
-    end
+
     logger.info("[ACSM] HTTP response: status=", code, "body_len=", #body)
     return body, code
 end
 
-local function deserializeResponse(body, context)
+function adobe.deserializeResponse(body, context)
     local ok, parsed = pcall(xml.deserialize, body)
     if not ok then
         return nil, context .. " returned malformed XML: " .. tostring(parsed)
@@ -79,7 +87,7 @@ local function deserializeResponse(body, context)
     return parsed
 end
 
-local function serverError(parsed, fallback)
+function adobe.serverError(parsed, fallback)
     local err = parsed and parsed.error
     if type(err) == "table" and err._attr and err._attr.data then
         return err._attr.data
@@ -91,13 +99,13 @@ local function serverError(parsed, fallback)
 end
 
 local function adeptGet(endpoint)
-    return requestToString({
+    return adobe.requestToString({
         url = endpoint,
     })
 end
 
-local function adeptPost(endpoint, body)
-    return requestToString({
+function adobe.adeptPost(endpoint, body, allow_error_response)
+    return adobe.requestToString({
         url = endpoint,
         method = "POST",
         headers = {
@@ -105,7 +113,7 @@ local function adeptPost(endpoint, body)
             ["Content-Length"] = tostring(#body),
         },
         source = ltn12.source.string(body),
-    })
+    }, allow_error_response)
 end
 
 function adobe.serializeActivation(creds, deviceUUID, fingerprint, authCert, activationURL)
@@ -182,12 +190,12 @@ function adobe.getAuthenticationServiceInfo()
     end
 
     logger.info("[ACSM] getAuthenticationServiceInfo: parsing response...")
-    local parsed, parseErr = deserializeResponse(response, "AuthenticationServiceInfo")
+    local parsed, parseErr = adobe.deserializeResponse(response, "AuthenticationServiceInfo")
     if not parsed then
         return nil, parseErr
     end
     if parsed.error then
-        return nil, "AuthenticationServiceInfo error: " .. serverError(parsed, response)
+        return nil, "AuthenticationServiceInfo error: " .. adobe.serverError(parsed, response)
     end
 
     local info = parsed.authenticationServiceInfo
@@ -260,18 +268,18 @@ function adobe.signIn(method, username, password, authCert)
     }, "signIn")
 
     logger.info("[ACSM] signIn: sending sign-in request...")
-    local response, requestErr = adeptPost(url.build(util.endpoint(adobe.EDEN_URL, "SignInDirect")), signInRequest)
+    local response, requestErr = adobe.adeptPost(url.build(util.endpoint(adobe.EDEN_URL, "SignInDirect")), signInRequest)
     if not response then
         return nil, "Sign-in request failed: " .. tostring(requestErr)
     end
-    local resp, parseErr = deserializeResponse(response, "SignInDirect")
+    local resp, parseErr = adobe.deserializeResponse(response, "SignInDirect")
     if not resp then
         return nil, parseErr
     end
     logger.info("[ACSM] signIn: got response")
 
     if resp.error then
-        return nil, "Server returned error: " .. serverError(resp, response)
+        return nil, "Server returned error: " .. adobe.serverError(resp, response)
     end
     local credentials = resp.credentials
     if
@@ -364,17 +372,17 @@ function adobe.activate(user, deviceKey, pkcs12)
     end
 
     logger.info("[ACSM] activate: sending activation request...")
-    local response, requestErr = adeptPost(url.build(util.endpoint(adobe.EDEN_URL, "Activate")), activationRequest)
+    local response, requestErr = adobe.adeptPost(url.build(util.endpoint(adobe.EDEN_URL, "Activate")), activationRequest)
     if not response then
         return nil, "Activation request failed: " .. tostring(requestErr)
     end
     logger.info("[ACSM] activate: parsing activation response...")
-    local resp, parseErr = deserializeResponse(response, "Activate")
+    local resp, parseErr = adobe.deserializeResponse(response, "Activate")
     if not resp then
         return nil, parseErr
     end
     if resp.error then
-        local err = serverError(resp, response)
+        local err = adobe.serverError(resp, response)
         logger.warn("[ACSM] activate: server returned error:", err)
         return nil, "Server returned error: " .. err
     end

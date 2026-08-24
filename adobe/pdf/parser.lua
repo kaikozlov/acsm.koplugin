@@ -275,7 +275,7 @@ function parser:_parse_step()
     elseif state == "number" then
         return self:_parse_number()
     elseif state == "decimal" then
-        return self:_parse_decimal()
+        return self:_parse_number()
     elseif state == "keyword" then
         return self:_parse_keyword()
     elseif state == "string" then
@@ -446,19 +446,22 @@ function parser:_parse_literal_hex()
     end
 end
 
+local function emit_number(self)
+    local n = tonumber(self._token)
+    if n then
+        self:_add_token(n)
+    end
+    self._parse_state = "main"
+end
+
 function parser:_parse_number()
     while true do
         local b = self:_peekbyte()
         if b == nil then
-            -- EOF: emit integer
-            local n = tonumber(self._token)
-            if n then
-                self:_add_token(n)
-            end
-            self._parse_state = "main"
+            emit_number(self)
             return nil
         end
-        if b == 46 then -- '.': switch to decimal
+        if b == 46 and self._parse_state == "number" then -- first '.': switch to decimal
             self:_advance(1)
             self._token = self._token .. "."
             self._parse_state = "decimal"
@@ -468,39 +471,7 @@ function parser:_parse_number()
             self:_advance(1)
             self._token = self._token .. string.char(b)
         else
-            -- End of integer
-            local n = tonumber(self._token)
-            if n then
-                self:_add_token(n)
-            end
-            self._parse_state = "main"
-            return true
-        end
-    end
-end
-
-function parser:_parse_decimal()
-    while true do
-        local b = self:_peekbyte()
-        if b == nil then
-            -- EOF: emit decimal
-            local n = tonumber(self._token)
-            if n then
-                self:_add_token(n)
-            end
-            self._parse_state = "main"
-            return nil
-        end
-        if is_digit(b) then
-            self:_advance(1)
-            self._token = self._token .. string.char(b)
-        else
-            -- End of decimal
-            local n = tonumber(self._token)
-            if n then
-                self:_add_token(n)
-            end
-            self._parse_state = "main"
+            emit_number(self)
             return true
         end
     end
@@ -851,17 +822,6 @@ end
 ------------------------------------------------------------------------
 -- Object parser (PSStackParser equivalent)
 ------------------------------------------------------------------------
-
-function parser:_reset()
-    self._context = {}
-    self._curtype = nil
-    self._curstack = {}
-    self._results = {}
-end
-
-function parser:seek(pos)
-    self:_do_seek(pos)
-end
 
 --- Push objects onto the current stack.
 local function push(self, ...)
