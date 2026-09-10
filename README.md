@@ -13,8 +13,6 @@ A KOReader plugin that lets you borrow ebooks from your public library and read 
 
 1. Borrow an ebook from your library and download the `.acsm` file. In Libby: **Shelf → Manage Loan → Read With... → Other Options → EPUB** (or PDF, when offered).
 
-   > **Tip:** On Kindle, you can do this entirely on-device — open the Kindle's built-in web browser, go to [libbyapp.com](https://libbyapp.com), borrow a book, and download the `.acsm` file directly.
-
 2. Tap the `.acsm` file in KOReader's file browser
 3. When prompted for a provider, select **ACSM** — if it doesn't prompt, hold down the file and select "Open with"
 4. Wait for the progress messages to finish, then read
