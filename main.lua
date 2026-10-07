@@ -8,19 +8,22 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local DocumentRegistry = require("document/documentregistry")
 local InfoMessage = require("ui/widget/infomessage")
+local InputDialog = require("ui/widget/inputdialog")
+local PathChooser = require("ui/widget/pathchooser")
 local LuaSettings = require("luasettings")
 local NetworkMgr = require("ui/network/manager")
-local Notification = require("ui/widget/notification")
 local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ffiUtil = require("ffi/util")
+local dump = require("dump")
 local logger = require("logger")
 local util = require("util")
 local _ = require("gettext")
 local T = ffiUtil.template
 
 local adobe = require("adobe.adobe")
+local activationbackup = require("adobe.activationbackup")
 local fulfillment = require("adobe.fulfillment")
 local naming = require("adobe.util.naming")
 local xml = require("adobe.util.xml")
@@ -91,14 +94,9 @@ function ACSM:getSubMenuItems()
     self:loadSettings()
     return {
         {
-            text_func = function()
-                if self.activation_blob then
-                    return _("Adobe activation: ready")
-                end
-                return _("Adobe activation: not set")
-            end,
-            enabled_func = function()
-                return false
+            text = _("Adobe activation"),
+            sub_item_table_func = function()
+                return self:getActivationMenuItems()
             end,
         },
         {
@@ -121,25 +119,162 @@ function ACSM:getSubMenuItems()
                 self:saveSettings()
             end,
         },
+    }
+end
+
+function ACSM:getActivationMenuItems()
+    self:loadSettings()
+    return {
         {
-            text = _("Forget Adobe activation"),
+            text_func = function()
+                return self.activation_blob and _("Status: saved") or _("Status: not set")
+            end,
+            enabled = false,
+        },
+        {
+            text = _("Forget activation"),
             enabled_func = function()
                 return self.activation_blob ~= nil
             end,
             callback = function()
                 UIManager:show(ConfirmBox:new({
-                    text = _("Forget the saved Adobe activation?"),
+                    text = _(
+                        "Forget this device's saved Adobe activation? This does not deactivate it on Adobe's servers. Previously borrowed books may require the original activation. Export a backup first if you may need it again.\n\nExported files and KOReader settings backups are not erased."
+                    ),
                     ok_text = _("Forget"),
                     ok_callback = function()
-                        self:clearActivation()
-                        UIManager:show(Notification:new({
-                            text = _("Saved Adobe activation cleared."),
+                        local ok, err = self:clearActivation()
+                        UIManager:show(InfoMessage:new({
+                            text = ok and _("Saved Adobe activation forgotten.") or T(_("Could not forget activation: %1"), err),
                         }))
                     end,
                 }))
             end,
         },
+        {
+            text = _("Export activation to file"),
+            enabled_func = function()
+                return self.activation_blob ~= nil
+            end,
+            callback = function()
+                self:showExportActivation()
+            end,
+        },
+        {
+            text = _("Load activation from file"),
+            callback = function()
+                self:showLoadActivation()
+            end,
+        },
     }
+end
+
+function ACSM:showExportActivation()
+    self:loadSettings()
+    if not self.activation_blob then
+        return
+    end
+    UIManager:show(ConfirmBox:new({
+        text = _(
+            "This backup contains private activation keys and account information in an unencrypted JSON file. Keep it somewhere private and do not share it."
+        ),
+        ok_text = _("Choose folder"),
+        ok_callback = function()
+            UIManager:show(PathChooser:new({
+                select_file = false,
+                show_files = false,
+                onConfirm = function(path)
+                    self:showExportActivationName(path)
+                end,
+            }))
+        end,
+    }))
+end
+
+function ACSM:showExportActivationName(dir)
+    local dialog
+    dialog = InputDialog:new({
+        title = _("Activation backup filename"),
+        input = "acsm-activation.json",
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = _("Export"),
+                    is_enter_default = true,
+                    callback = function()
+                        local name = dialog:getInputText()
+                        if name == "" or name == "." or name == ".." or name:find("[/\\%c]") then
+                            UIManager:show(InfoMessage:new({ text = _("Enter a filename without folder separators.") }))
+                            return
+                        end
+                        UIManager:close(dialog)
+                        self:confirmExportActivation(dir .. "/" .. name)
+                    end,
+                },
+            },
+        },
+    })
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function ACSM:confirmExportActivation(path)
+    local function export()
+        local ok, err = activationbackup.write(path, self.activation_blob)
+        UIManager:show(InfoMessage:new({
+            text = ok and T(_("Activation exported to:\n%1"), path) or T(_("Could not export activation: %1"), err),
+        }))
+    end
+    if util.pathExists(path) then
+        UIManager:show(ConfirmBox:new({
+            text = T(_("Replace the existing file?\n\n%1"), path),
+            ok_text = _("Replace"),
+            ok_callback = export,
+        }))
+    else
+        export()
+    end
+end
+
+function ACSM:showLoadActivation()
+    UIManager:show(PathChooser:new({
+        select_directory = false,
+        onConfirm = function(path)
+            self:confirmLoadActivation(path)
+        end,
+    }))
+end
+
+function ACSM:confirmLoadActivation(path)
+    self:loadSettings()
+    local candidate, err = activationbackup.read(path)
+    if not candidate then
+        UIManager:show(InfoMessage:new({ text = T(_("Could not load activation: %1"), err) }))
+        return
+    end
+    local text = _("Load the activation from this backup? Only load backups you trust.")
+    if self.activation_blob then
+        text = _(
+            "Replace the saved activation with this backup? Previously borrowed books may require the current activation. Export it first if you may need it again. Only load backups you trust."
+        )
+    end
+    UIManager:show(ConfirmBox:new({
+        text = text,
+        ok_text = self.activation_blob and _("Replace") or _("Load"),
+        ok_callback = function()
+            local ok, save_err = self:saveActivation(candidate)
+            UIManager:show(InfoMessage:new({
+                text = ok and _("Adobe activation loaded.") or T(_("Could not save activation: %1"), save_err),
+            }))
+        end,
+    }))
 end
 
 function ACSM:registerDocumentRegistryAuxProvider()
@@ -450,10 +585,32 @@ function ACSM:saveFulfillmentMapping(resource_id, output_path)
     logger.info("[ACSM] Saved fulfillment mapping:", resource_id, "→", output_path)
 end
 
-function ACSM:clearActivation()
+-- Commit a candidate before changing live state. LuaSettings:flush() does not
+-- report write failures, so use the checked atomic writer for these operations.
+function ACSM:saveActivation(candidate)
     self:loadSettings()
-    self.activation_blob = nil
-    self:saveSettings()
+    local data = {}
+    for key, value in pairs(self.settings.data) do
+        data[key] = value
+    end
+    data.activation = candidate
+    data.reuse_existing = self.reuse_existing
+    data.open_after_download = self.open_after_download
+    local encoded, serialized = pcall(dump, data, nil, true)
+    if not encoded then
+        return nil, _("Could not encode activation settings")
+    end
+    local ok, err = activationbackup.writeFile(self.settings_file, "return " .. serialized .. "\n")
+    if not ok then
+        return nil, err
+    end
+    self.settings.data = data
+    self.activation_blob = candidate
+    return true
+end
+
+function ACSM:clearActivation()
+    return self:saveActivation(nil)
 end
 
 --- Delete all plugin settings and cached data.
