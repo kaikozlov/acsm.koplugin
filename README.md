@@ -25,9 +25,31 @@ The resulting EPUB or PDF is saved next to the original `.acsm` file and works l
 
 | Setting | Description |
 | ------- | ----------- |
-| Activation status | Whether the plugin has an active Adobe device registration |
+| Open book after download | Open the downloaded book automatically (on by default) |
 | Reuse existing file | Open the previously downloaded EPUB or PDF instead of re-fetching (on by default) |
-| Forget Adobe activation | Clear the saved activation to start fresh |
+| Adobe activation | View saved status, forget locally, export a backup, or load a backup |
+
+#### Managing activation
+
+Under **ACSM → Adobe activation**, status indicates whether an activation is
+saved locally (it does not check Adobe's servers). Export uses KOReader's folder
+chooser: long-press a folder to select it, then enter a filename. Loading uses
+the file chooser: long-press an exported backup to select it. Both choosers also
+support non-touch navigation. Replacing an existing file or activation requires
+confirmation; cancelling or choosing an invalid backup leaves the current
+activation unchanged.
+
+Backups are versioned `.json` files produced by this plugin, not Adobe Digital
+Editions files or executable KOReader `.lua` settings files. They contain
+**unencrypted private keys and account information**. Keep them private and only
+load backups you trust. Export requests owner-only permissions where supported;
+removable filesystems may not enforce them. Writes use a temporary file beside
+the destination and replace it only after writing and closing succeeds.
+
+Forgetting removes the plugin's active saved activation locally; it does not
+contact Adobe or erase exported files or KOReader's `.old` settings backups.
+Previously borrowed books may need their original activation, so export it
+before replacing or forgetting it if you may need it again.
 
 ### Compatibility
 
