@@ -153,7 +153,7 @@ function ACSM:getActivationMenuItems()
             callback = function(touchmenu_instance)
                 UIManager:show(ConfirmBox:new({
                     text = _(
-                        "Forget this device's saved Adobe activation? This does not deactivate it on Adobe's servers. Previously borrowed books may require the original activation. Export a backup first if you may need it again.\n\nExported files and KOReader settings backups are not erased."
+                        "Forget this device's Adobe activation?\n\nPreviously borrowed books may require it to download again. Export a backup first if you may need it."
                     ),
                     ok_text = _("Forget"),
                     ok_callback = function()
@@ -193,7 +193,7 @@ function ACSM:showExportActivation()
         return
     end
     UIManager:show(ConfirmBox:new({
-        text = _("This backup contains private activation and account information. Keep it somewhere private and do not share it."),
+        text = _("This backup contains private activation and account information. Keep it somewhere safe and don't share it."),
         ok_text = _("Choose folder"),
         ok_callback = function()
             UIManager:show(PathChooser:new({
@@ -279,9 +279,7 @@ function ACSM:confirmLoadActivation(path, touchmenu_instance)
     end
     local text = _("Load the Adobe activation from this backup?")
     if self.activation_blob then
-        text = _(
-            "This will replace the saved Adobe activation. Existing loans may require the current activation to download again. Export it first if you may need it again.\n\nReplace the saved activation?"
-        )
+        text = _("Replace the saved Adobe activation?\n\nExisting loans may require it to download again. Export it first if you may need it.")
     end
     UIManager:show(ConfirmBox:new({
         text = text,
