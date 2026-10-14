@@ -25,9 +25,15 @@ The resulting EPUB or PDF is saved next to the original `.acsm` file and works l
 
 | Setting | Description |
 | ------- | ----------- |
-| Activation status | Whether the plugin has an active Adobe device registration |
+| Open book after download | Open the downloaded book automatically (on by default) |
 | Reuse existing file | Open the previously downloaded EPUB or PDF instead of re-fetching (on by default) |
-| Forget Adobe activation | Clear the saved activation to start fresh |
+| Adobe activation | View status, export a backup, load a backup, or forget the activation |
+
+#### Managing activation
+
+Under **ACSM → Adobe activation** you can export the saved activation to a file and load it on another device (or after a reinstall) — no need to start over with a new activation. You can also forget it to start fresh; export a backup first if you have borrowed books, since they may need the original activation to download again.
+
+Activation backups contain your private keys, unencrypted. Keep them somewhere private.
 
 ### Compatibility
 
