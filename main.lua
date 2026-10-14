@@ -4,6 +4,7 @@ local plugin_root = source:sub(1, 1) == "@" and source:sub(2):match("^(.*)/main%
 -- xml2lua lives in a subdirectory not covered by pluginloader's plugin_root/?.lua
 package.path = plugin_root .. "/dependencies/?.lua;" .. package.path
 
+local BD = require("ui/bidi")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local DocumentRegistry = require("document/documentregistry")
@@ -59,10 +60,10 @@ end
 
 function ACSM:onFlushSettings()
     if self.settings then
-        self.settings:saveSetting("activation", self.activation_blob)
-        self.settings:saveSetting("reuse_existing", self.reuse_existing)
-        self.settings:saveSetting("open_after_download", self.open_after_download)
-        self.settings:flush()
+        local ok, err = self:saveSettings()
+        if not ok then
+            logger.warn("[ACSM] Could not save settings:", err)
+        end
     end
 end
 
@@ -77,7 +78,19 @@ function ACSM:loadSettings()
 end
 
 function ACSM:saveSettings()
-    self:onFlushSettings()
+    if not self.settings then
+        return true
+    end
+    self.settings:saveSetting("activation", self.activation_blob)
+    self.settings:saveSetting("reuse_existing", self.reuse_existing)
+    self.settings:saveSetting("open_after_download", self.open_after_download)
+    -- LuaSettings:flush() discards write errors. Keep its data model and dump
+    -- format, but commit through the checked writer so activation can roll back.
+    local ok, serialized = pcall(dump, self.settings.data, nil, true)
+    if not ok then
+        return nil, _("Could not encode settings")
+    end
+    return activationbackup.writeFile(self.settings.file, "return " .. serialized .. "\n")
 end
 
 function ACSM:addToMainMenu(menu_items)
@@ -133,10 +146,11 @@ function ACSM:getActivationMenuItems()
         },
         {
             text = _("Forget activation"),
+            keep_menu_open = true,
             enabled_func = function()
                 return self.activation_blob ~= nil
             end,
-            callback = function()
+            callback = function(touchmenu_instance)
                 UIManager:show(ConfirmBox:new({
                     text = _(
                         "Forget this device's saved Adobe activation? This does not deactivate it on Adobe's servers. Previously borrowed books may require the original activation. Export a backup first if you may need it again.\n\nExported files and KOReader settings backups are not erased."
@@ -144,6 +158,9 @@ function ACSM:getActivationMenuItems()
                     ok_text = _("Forget"),
                     ok_callback = function()
                         local ok, err = self:clearActivation()
+                        if ok then
+                            touchmenu_instance:updateItems()
+                        end
                         UIManager:show(InfoMessage:new({
                             text = ok and _("Saved Adobe activation forgotten.") or T(_("Could not forget activation: %1"), err),
                         }))
@@ -162,8 +179,9 @@ function ACSM:getActivationMenuItems()
         },
         {
             text = _("Load activation from file"),
-            callback = function()
-                self:showLoadActivation()
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                self:showLoadActivation(touchmenu_instance)
             end,
         },
     }
@@ -175,14 +193,13 @@ function ACSM:showExportActivation()
         return
     end
     UIManager:show(ConfirmBox:new({
-        text = _(
-            "This backup contains private activation keys and account information in an unencrypted JSON file. Keep it somewhere private and do not share it."
-        ),
+        text = _("This backup contains private activation and account information. Keep it somewhere private and do not share it."),
         ok_text = _("Choose folder"),
         ok_callback = function()
             UIManager:show(PathChooser:new({
                 select_file = false,
                 show_files = false,
+                path = self.ui.file_chooser and self.ui.file_chooser.path or G_reader_settings:readSetting("lastdir"),
                 onConfirm = function(path)
                     self:showExportActivationName(path)
                 end,
@@ -215,7 +232,7 @@ function ACSM:showExportActivationName(dir)
                             return
                         end
                         UIManager:close(dialog)
-                        self:confirmExportActivation(dir .. "/" .. name)
+                        self:confirmExportActivation(ffiUtil.joinPath(dir, name))
                     end,
                 },
             },
@@ -229,12 +246,12 @@ function ACSM:confirmExportActivation(path)
     local function export()
         local ok, err = activationbackup.write(path, self.activation_blob)
         UIManager:show(InfoMessage:new({
-            text = ok and T(_("Activation exported to:\n%1"), path) or T(_("Could not export activation: %1"), err),
+            text = ok and T(_("Activation exported to:\n%1"), BD.filepath(path)) or T(_("Could not export activation: %1"), err),
         }))
     end
     if util.pathExists(path) then
         UIManager:show(ConfirmBox:new({
-            text = T(_("Replace the existing file?\n\n%1"), path),
+            text = T(_("Replace the existing file?\n\n%1"), BD.filepath(path)),
             ok_text = _("Replace"),
             ok_callback = export,
         }))
@@ -243,26 +260,27 @@ function ACSM:confirmExportActivation(path)
     end
 end
 
-function ACSM:showLoadActivation()
+function ACSM:showLoadActivation(touchmenu_instance)
     UIManager:show(PathChooser:new({
         select_directory = false,
+        path = self.ui.file_chooser and self.ui.file_chooser.path or G_reader_settings:readSetting("lastdir"),
         onConfirm = function(path)
-            self:confirmLoadActivation(path)
+            self:confirmLoadActivation(path, touchmenu_instance)
         end,
     }))
 end
 
-function ACSM:confirmLoadActivation(path)
+function ACSM:confirmLoadActivation(path, touchmenu_instance)
     self:loadSettings()
     local candidate, err = activationbackup.read(path)
     if not candidate then
         UIManager:show(InfoMessage:new({ text = T(_("Could not load activation: %1"), err) }))
         return
     end
-    local text = _("Load the activation from this backup? Only load backups you trust.")
+    local text = _("Load the Adobe activation from this backup?")
     if self.activation_blob then
         text = _(
-            "Replace the saved activation with this backup? Previously borrowed books may require the current activation. Export it first if you may need it again. Only load backups you trust."
+            "This will replace the saved Adobe activation. Existing loans may require the current activation to download again. Export it first if you may need it again.\n\nReplace the saved activation?"
         )
     end
     UIManager:show(ConfirmBox:new({
@@ -270,6 +288,9 @@ function ACSM:confirmLoadActivation(path)
         ok_text = self.activation_blob and _("Replace") or _("Load"),
         ok_callback = function()
             local ok, save_err = self:saveActivation(candidate)
+            if ok and touchmenu_instance then
+                touchmenu_instance:updateItems()
+            end
             UIManager:show(InfoMessage:new({
                 text = ok and _("Adobe activation loaded.") or T(_("Could not save activation: %1"), save_err),
             }))
@@ -585,28 +606,16 @@ function ACSM:saveFulfillmentMapping(resource_id, output_path)
     logger.info("[ACSM] Saved fulfillment mapping:", resource_id, "→", output_path)
 end
 
--- Commit a candidate before changing live state. LuaSettings:flush() does not
--- report write failures, so use the checked atomic writer for these operations.
 function ACSM:saveActivation(candidate)
     self:loadSettings()
-    local data = {}
-    for key, value in pairs(self.settings.data) do
-        data[key] = value
-    end
-    data.activation = candidate
-    data.reuse_existing = self.reuse_existing
-    data.open_after_download = self.open_after_download
-    local encoded, serialized = pcall(dump, data, nil, true)
-    if not encoded then
-        return nil, _("Could not encode activation settings")
-    end
-    local ok, err = activationbackup.writeFile(self.settings_file, "return " .. serialized .. "\n")
-    if not ok then
-        return nil, err
-    end
-    self.settings.data = data
+    local previous = self.activation_blob
     self.activation_blob = candidate
-    return true
+    local ok, err = self:saveSettings()
+    if not ok then
+        self.activation_blob = previous
+        self.settings:saveSetting("activation", previous)
+    end
+    return ok, err
 end
 
 function ACSM:clearActivation()
@@ -695,8 +704,10 @@ function ACSM:createActivation()
     if not serialized then
         return nil, serializeErr
     end
-    self.activation_blob = serialized
-    self:saveSettings()
+    local saved, save_err = self:saveActivation(serialized)
+    if not saved then
+        return nil, save_err
+    end
     logger.info("[ACSM] createActivation: complete")
 
     return activation
