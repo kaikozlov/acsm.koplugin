@@ -177,7 +177,7 @@ docker run --rm -e SDL_VIDEODRIVER=dummy \
   -v "$PWD:/opt/plugin" \
   -v /tmp/probe_spec.lua:/tmp/probe_spec.lua \
   -e PLUGIN_NAME=acsm \
-  ghcr.io/kaikozlov/koplugin-dev:v2026.07.1_1 \
+  ghcr.io/kaikozlov/koplugin-dev:v2026.07.1_2 \
   busted-koreader --verbose --helper=/opt/koplugin-dev/commonrequire.lua \
   /tmp/probe_spec.lua
 ```
