@@ -260,7 +260,7 @@ creates. Currently that is:
 
 | On-disk path | Type | Content |
 |---|---|---|
-| `settings/acsm.lua` | LuaSettings file | `activation`, `reuse_existing`, `open_after_download` |
+| `settings/acsm.lua` | LuaSettings file | `activation`, `reuse_existing`, `open_after_download`, `delete_acsm_after_fulfillment` |
 | `cache/acsm.koplugin/` | Directory | `fulfillment_map.lua` + temp fulfillment/epub work files |
 
 **No `G_reader_settings` keys are used** — all state is in the plugin's own files.

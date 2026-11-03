@@ -291,6 +291,7 @@ describe("ACSM deletePluginSettings", function()
             }
             main.open_after_download = false
             main.reuse_existing = false
+            main.delete_acsm_after_fulfillment = true
             main:saveSettings()
 
             -- Write a fulfillment map entry

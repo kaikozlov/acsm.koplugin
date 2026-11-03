@@ -901,6 +901,75 @@ describe("main.lua helpers & orchestration", function()
             rmTmpDir(tmp)
         end)
 
+        describe("delete ACSM after fulfillment", function()
+            local DocSettings, NetworkMgr
+            local original_will_rerun
+
+            before_each(function()
+                DocSettings = require("docsettings")
+                NetworkMgr = require("ui/network/manager")
+                original_will_rerun = NetworkMgr.willRerunWhenOnline
+                NetworkMgr.willRerunWhenOnline = function()
+                    return false
+                end
+            end)
+
+            after_each(function()
+                NetworkMgr.willRerunWhenOnline = original_will_rerun
+            end)
+
+            --- Run openFile on a real .acsm with a sidecar, fulfillment stubbed.
+            local function runOpenFile(tag, delete_enabled, fulfill_ok)
+                local main, tmp = loadInTmpDir(tag)
+                local acsm_path = tmp .. "/loan.acsm"
+                assert(koutil.writeToFile("<fulfillmentToken/>", acsm_path))
+                local doc_settings = DocSettings:open(acsm_path)
+                doc_settings:saveSetting("doc_props", { title = "Loan" })
+                doc_settings:flush()
+                assert.is_true(DocSettings:hasSidecarFile(acsm_path))
+
+                main.ui = {}
+                main:loadSettings()
+                main.open_after_download = false
+                if delete_enabled ~= nil then
+                    main.delete_acsm_after_fulfillment = delete_enabled
+                end
+                main.parseAcsmMetadata = function()
+                    return nil
+                end
+                main.fulfillLoan = function()
+                    if fulfill_ok then
+                        return { outputPath = tmp .. "/book.epub" }
+                    end
+                    return nil, "fulfillment failed"
+                end
+
+                main:openFile(acsm_path)
+                return main, tmp, acsm_path
+            end
+
+            it("deletes the ACSM and its sidecar after a successful fulfillment when enabled", function()
+                local _, tmp, acsm_path = runOpenFile("delete-acsm-on", true, true)
+                assert.is_false(koutil.pathExists(acsm_path))
+                assert.is_false(DocSettings:hasSidecarFile(acsm_path))
+                rmTmpDir(tmp)
+            end)
+
+            it("keeps the ACSM by default", function()
+                local main, tmp, acsm_path = runOpenFile("delete-acsm-default", nil, true)
+                assert.is_false(main.delete_acsm_after_fulfillment)
+                assert.is_true(koutil.pathExists(acsm_path))
+                rmTmpDir(tmp)
+            end)
+
+            it("keeps the ACSM when fulfillment fails", function()
+                local _, tmp, acsm_path = runOpenFile("delete-acsm-failed", true, false)
+                assert.is_true(koutil.pathExists(acsm_path))
+                assert.is_true(DocSettings:hasSidecarFile(acsm_path))
+                rmTmpDir(tmp)
+            end)
+        end)
+
         it("is a no-op for non-acsm files", function()
             local main, tmp = loadInTmpDir("openfile-noacsm")
             main:loadSettings()

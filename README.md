@@ -27,6 +27,7 @@ The resulting EPUB or PDF is saved next to the original `.acsm` file and works l
 | ------- | ----------- |
 | Open book after download | Open the downloaded book automatically (on by default) |
 | Reuse existing file | Open the previously downloaded EPUB or PDF instead of re-fetching (on by default) |
+| Delete ACSM after fulfillment | Remove the `.acsm` file once its book has been fulfilled successfully (off by default) |
 | Adobe activation | View status, export a backup, load a backup, or forget the activation |
 
 #### Managing activation

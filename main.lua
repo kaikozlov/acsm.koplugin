@@ -75,6 +75,7 @@ function ACSM:loadSettings()
     self.activation_blob = self.settings:readSetting("activation")
     self.reuse_existing = self.settings:nilOrTrue("reuse_existing")
     self.open_after_download = self.settings:nilOrTrue("open_after_download")
+    self.delete_acsm_after_fulfillment = self.settings:isTrue("delete_acsm_after_fulfillment")
 end
 
 function ACSM:saveSettings()
@@ -84,6 +85,7 @@ function ACSM:saveSettings()
     self.settings:saveSetting("activation", self.activation_blob)
     self.settings:saveSetting("reuse_existing", self.reuse_existing)
     self.settings:saveSetting("open_after_download", self.open_after_download)
+    self.settings:saveSetting("delete_acsm_after_fulfillment", self.delete_acsm_after_fulfillment)
     -- LuaSettings:flush() discards write errors. Keep its data model and dump
     -- format, but commit through the checked writer so activation can roll back.
     local ok, serialized = pcall(dump, self.settings.data, nil, true)
@@ -129,6 +131,19 @@ function ACSM:getSubMenuItems()
             end,
             callback = function()
                 self.reuse_existing = not self.reuse_existing
+                self:saveSettings()
+            end,
+        },
+        {
+            text = _("Delete ACSM after fulfillment"),
+            help_text = _(
+                "Remove the .acsm file once its book has been fulfilled. To fulfill the book again, get a new .acsm file from your library or store."
+            ),
+            checked_func = function()
+                return self.delete_acsm_after_fulfillment
+            end,
+            callback = function()
+                self.delete_acsm_after_fulfillment = not self.delete_acsm_after_fulfillment
                 self:saveSettings()
             end,
         },
@@ -822,6 +837,12 @@ function ACSM:openFile(file)
             if not result then
                 showProcessingError(fulfill_err)
                 return
+            end
+
+            if self.delete_acsm_after_fulfillment then
+                -- Also clears sidecar, history, collection and book info cache entries.
+                local FileManager = require("apps/filemanager/filemanager")
+                FileManager:deleteFile(file, true)
             end
 
             if self.ui.file_chooser then
