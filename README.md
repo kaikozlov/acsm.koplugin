@@ -12,7 +12,6 @@ A KOReader plugin that lets you borrow ebooks from your public library and read 
 ### Usage
 
 1. Borrow an ebook from your library and download the `.acsm` file. In Libby: **Shelf → Manage Loan → Read With... → Other Options → EPUB** (or PDF, when offered).
-
 2. Tap the `.acsm` file in KOReader's file browser
 3. When prompted for a provider, select **ACSM** — if it doesn't prompt, hold down the file and select "Open with"
 4. Wait for the progress messages to finish, then read
@@ -33,8 +32,6 @@ The resulting EPUB or PDF is saved next to the original `.acsm` file and works l
 #### Managing activation
 
 Under **ACSM → Adobe activation** you can export the saved activation to a file and load it on another device (or after a reinstall) — no need to start over with a new activation. You can also forget it to start fresh; export a backup first if you have borrowed books, since they may need the original activation to download again.
-
-Activation backups contain your private keys, unencrypted. Keep them somewhere private.
 
 ### Compatibility
 

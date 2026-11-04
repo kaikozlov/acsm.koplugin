@@ -45,13 +45,6 @@ local function trimError(err)
     return err:gsub("^.-: ", "")
 end
 
-local function isActivationError(err)
-    if type(err) ~= "string" then
-        return false
-    end
-    return err:find("E_ADEPT_USER_AUTH", 1, true) or err:find("E_ADEPT_DISTRIBUTOR_AUTH", 1, true) or err:find("E_ADEPT", 1, true)
-end
-
 function ACSM:init()
     self.ui.menu:registerToMainMenu(self)
     self:registerDocumentRegistryAuxProvider()
@@ -675,7 +668,6 @@ function ACSM:restoreActivation()
     local restored, err = adobe.restoreActivation(self.activation_blob)
     if not restored then
         logger.warn("[ACSM] restoreActivation: failed:", err)
-        self:clearActivation()
         return nil, err
     end
     logger.info("[ACSM] restoreActivation: success")
@@ -726,18 +718,13 @@ function ACSM:createActivation()
     return activation
 end
 
-function ACSM:getActivation(force_new)
-    logger.info("[ACSM] getActivation: force_new=", force_new)
-    if not force_new then
-        local restored = self:restoreActivation()
-        if restored then
-            logger.info("[ACSM] getActivation: using restored activation")
-            return restored, true
-        end
+function ACSM:getActivation()
+    self:loadSettings()
+    if self.activation_blob then
+        return self:restoreActivation()
     end
     logger.info("[ACSM] getActivation: creating new activation")
-    local created, err = self:createActivation()
-    return created, false, err
+    return self:createActivation()
 end
 
 function ACSM:openGeneratedBook(path)
@@ -754,10 +741,9 @@ end
 
 function ACSM:fulfillLoan(acsm_path, acsm_meta)
     logger.info("[ACSM] fulfillLoan: acsm_path=", acsm_path)
-    local activation, reused, activationErr = self:getActivation(false)
+    local activation, activationErr = self:getActivation()
     if not activation then
-        -- Also accept the older two-value error shape from stubs/extensions.
-        return nil, activationErr or reused or "Could not create Adobe activation"
+        return nil, activationErr
     end
 
     -- Title-based output path derived from ACSM metadata (not the downloaded book)
@@ -769,19 +755,6 @@ function ACSM:fulfillLoan(acsm_path, acsm_meta)
     logger.info("[ACSM] fulfillLoan: starting fulfillment.process...")
     local result, err =
         fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
-
-    if not result and reused and isActivationError(err) then
-        logger.warn("[ACSM] Saved activation failed, retrying with a new activation:", err)
-        self:clearActivation()
-        local newActivationErr
-        activation, newActivationErr = self:createActivation()
-        if not activation then
-            return nil, newActivationErr
-        end
-        Trapper:info(_("Retrying with new activation..."), false, true)
-        result, err =
-            fulfillment.process(acsm_path, output_path, activation.creds, activation.deviceUUID, activation.fingerprint, activation.authCert)
-    end
 
     if not result then
         return nil, err
@@ -869,7 +842,6 @@ function ACSM:openFile(file)
 end
 
 -- Underscore exports for testing (local functions)
-ACSM._isActivationError = isActivationError
 ACSM._trimError = trimError
 
 return ACSM

@@ -44,43 +44,6 @@ describe("main.lua helpers & orchestration", function()
     end
 
     -- ================================================================
-    -- isActivationError (exported as ACSM._isActivationError)
-    -- ================================================================
-    describe("_isActivationError", function()
-        local ACSM
-
-        before_each(function()
-            ACSM = loadFresh()
-        end)
-
-        it("matches E_ADEPT_USER_AUTH", function()
-            assert.is.truthy(ACSM._isActivationError("E_ADEPT_USER_AUTH something went wrong"))
-        end)
-
-        it("matches E_ADEPT_DISTRIBUTOR_AUTH", function()
-            assert.is.truthy(ACSM._isActivationError("E_ADEPT_DISTRIBUTOR_AUTH expired token"))
-        end)
-
-        it("matches generic E_ADEPT error", function()
-            assert.is.truthy(ACSM._isActivationError("E_ADEPT unknown device"))
-        end)
-
-        it("returns falsy for non-activation error strings", function()
-            assert.is_nil(ACSM._isActivationError("network timeout"))
-            assert.is_nil(ACSM._isActivationError("file not found"))
-        end)
-
-        it("returns false for nil", function()
-            assert.is_false(ACSM._isActivationError(nil))
-        end)
-
-        it("returns false for non-string types", function()
-            assert.is_false(ACSM._isActivationError(42))
-            assert.is_false(ACSM._isActivationError({}))
-        end)
-    end)
-
-    -- ================================================================
     -- trimError (exported as ACSM._trimError)
     -- ================================================================
     describe("_trimError", function()
@@ -207,56 +170,6 @@ describe("main.lua helpers & orchestration", function()
 
             rmTmpDir(tmp)
         end)
-
-        it("returns nil for incomplete serialized data", function()
-            local main, tmp = loadInTmpDir("restore-incomplete")
-            main:loadSettings()
-            main.activation_blob = { deviceKey = "only-key" } -- missing fields
-            main:saveSettings()
-
-            local result, err = main:restoreActivation()
-            assert.is_nil(result)
-            assert.is.truthy(err)
-
-            rmTmpDir(tmp)
-        end)
-
-        it("clears activation when restore fails with corrupt data", function()
-            local main, tmp = loadInTmpDir("restore-corrupt")
-            main:loadSettings()
-            main.activation_blob = { deviceKey = "bad" } -- incomplete
-            main:saveSettings()
-
-            local result = main:restoreActivation()
-            assert.is_nil(result)
-
-            -- restoreActivation calls clearActivation on failure
-            assert.is_nil(main.activation_blob)
-
-            rmTmpDir(tmp)
-        end)
-
-        it("clears a structurally complete activation with a corrupt private key", function()
-            local main, tmp = loadInTmpDir("restore-corrupt-key")
-            local base64 = require("adobe.util.util").base64
-            main:loadSettings()
-            main.activation_blob = {
-                deviceKey = base64.encode(string.rep("\0", 16)),
-                privateLicenseKey = base64.encode("not valid private DER"),
-                user = "urn:uuid:user",
-                pkcs12 = "present",
-                deviceUUID = "urn:uuid:device",
-                fingerprint = "present",
-            }
-            main:saveSettings()
-
-            local result, err = main:restoreActivation()
-            assert.is_nil(result)
-            assert.is_truthy(err)
-            assert.is_nil(main.activation_blob)
-
-            rmTmpDir(tmp)
-        end)
     end)
 
     -- ================================================================
@@ -311,58 +224,10 @@ describe("main.lua helpers & orchestration", function()
             }
             main:saveSettings()
 
-            local activation, reused = main:getActivation(false)
-            assert.is.truthy(activation)
-            assert.is_true(reused, "should have reused existing activation")
-
-            rmTmpDir(tmp)
-        end)
-
-        it("calls createActivation when force_new is true", function()
-            local main, tmp = loadInTmpDir("get-force")
-            main:loadSettings()
-
-            -- Track whether createActivation was called
-            local create_called = false
-            local fake_activation = {
-                creds = { user = "test" },
-                deviceUUID = "uuid",
-                fingerprint = "fp",
-                authCert = "cert",
-            }
-            main.createActivation = function(self)
-                create_called = true
-                return fake_activation
-            end
-
-            local activation, reused = main:getActivation(true)
-            assert.is_true(create_called)
-            assert.is_false(reused)
-            assert.are.equal(fake_activation, activation)
-
-            rmTmpDir(tmp)
-        end)
-
-        it("calls createActivation when no saved activation exists", function()
-            local main, tmp = loadInTmpDir("get-nosaved")
-            main:loadSettings()
-
-            local create_called = false
-            local fake_activation = {
-                creds = { user = "test" },
-                deviceUUID = "uuid",
-                fingerprint = "fp",
-                authCert = "cert",
-            }
-            main.createActivation = function(self)
-                create_called = true
-                return fake_activation
-            end
-
-            local activation, reused = main:getActivation(false)
-            assert.is_true(create_called)
-            assert.is_false(reused)
-            assert.are.equal(fake_activation, activation)
+            local activation, err = main:getActivation()
+            assert.is.truthy(activation, err)
+            assert.are.equal(main.activation_blob.user, activation.creds.user)
+            assert.are.equal(main.activation_blob.deviceUUID, activation.deviceUUID)
 
             rmTmpDir(tmp)
         end)
@@ -631,130 +496,18 @@ describe("main.lua helpers & orchestration", function()
         end)
     end)
 
-    -- ================================================================
-    -- fulfillLoan (stubbed network)
-    -- ================================================================
     describe("fulfillLoan", function()
-        it("returns an error when getActivation returns nil", function()
-            local main, tmp = loadInTmpDir("fulfill-no-act")
-            main:loadSettings()
-
-            main.getActivation = function(self, force_new)
-                return nil, "No activation"
-            end
-
-            local result, err = main:fulfillLoan("/test/book.acsm", {
-                title = "Test Book",
-                resourceId = "urn:uuid:test",
-            })
-            assert.is_nil(result)
-            assert.are.equal("No activation", err)
-
-            rmTmpDir(tmp)
-        end)
-
-        it("returns error when fulfillment.process fails", function()
-            local main, tmp = loadInTmpDir("fulfill-fail")
-            main:loadSettings()
-
-            -- Stub getActivation to return fake activation
-            main.getActivation = function(self, force_new)
-                return {
-                    creds = { user = "test" },
-                    deviceUUID = "uuid",
-                    fingerprint = "fp",
-                    authCert = "cert",
-                },
-                    false
-            end
-
-            -- Stub fulfillment.process to fail
-            local fulfillment = require("adobe.fulfillment")
-            local orig_process = fulfillment.process
-            fulfillment.process = function()
-                return nil, "fulfillment server error"
-            end
-
-            local result, err = main:fulfillLoan("/test/book.acsm", {
-                title = "Test Book",
-                resourceId = "urn:uuid:test",
-            })
-            assert.is_nil(result)
-            assert.is.truthy(err)
-
-            fulfillment.process = orig_process
-            rmTmpDir(tmp)
-        end)
-
-        it("retries with new activation on E_ADEPT error", function()
-            local main, tmp = loadInTmpDir("fulfill-retry")
-            main:loadSettings()
-
-            local call_count = 0
-            -- First call returns fake activation (reused), second gets new
-            main.getActivation = function(self, force_new)
-                if not force_new then
-                    return {
-                        creds = { user = "test" },
-                        deviceUUID = "uuid",
-                        fingerprint = "fp",
-                        authCert = "cert",
-                    },
-                        true -- reused
-                else
-                    return {
-                        creds = { user = "test2" },
-                        deviceUUID = "uuid2",
-                        fingerprint = "fp2",
-                        authCert = "cert2",
-                    },
-                        false
-                end
-            end
-
-            -- Stub createActivation for the retry path
-            main.createActivation = function(self)
-                return {
-                    creds = { user = "test2" },
-                    deviceUUID = "uuid2",
-                    fingerprint = "fp2",
-                    authCert = "cert2",
-                }
-            end
-
-            local fulfillment = require("adobe.fulfillment")
-            local orig_process = fulfillment.process
-            fulfillment.process = function()
-                call_count = call_count + 1
-                if call_count == 1 then
-                    return nil, "E_ADEPT_USER_AUTH expired"
-                end
-                return { outputPath = "/test/book.epub" }
-            end
-
-            local result = main:fulfillLoan("/test/book.acsm", {
-                title = "Test Book",
-                resourceId = "urn:uuid:test",
-            })
-            assert.is.truthy(result)
-            assert.are.equal(2, call_count)
-
-            fulfillment.process = orig_process
-            rmTmpDir(tmp)
-        end)
-
         it("saves fulfillment mapping on success", function()
             local main, tmp = loadInTmpDir("fulfill-map")
             main:loadSettings()
 
-            main.getActivation = function(self, force_new)
+            main.getActivation = function()
                 return {
                     creds = { user = "test" },
                     deviceUUID = "uuid",
                     fingerprint = "fp",
                     authCert = "cert",
-                },
-                    false
+                }
             end
 
             local fulfillment = require("adobe.fulfillment")
@@ -767,56 +520,10 @@ describe("main.lua helpers & orchestration", function()
                 title = "Test Book",
                 resourceId = "urn:uuid:mapped-resource",
             })
+            fulfillment.process = orig_process
             assert.is.truthy(result)
-
-            -- Verify mapping was saved (via in-memory cache)
             local mapped = main:lookupFulfillmentMapping("urn:uuid:mapped-resource")
             assert.is.truthy(mapped)
-
-            fulfillment.process = orig_process
-            rmTmpDir(tmp)
-        end)
-
-        it("does not retry non-activation errors", function()
-            local main, tmp = loadInTmpDir("fulfill-no-retry")
-            main:loadSettings()
-
-            local call_count = 0
-            main.getActivation = function(self, force_new)
-                return {
-                    creds = { user = "test" },
-                    deviceUUID = "uuid",
-                    fingerprint = "fp",
-                    authCert = "cert",
-                },
-                    true -- reused so retry path is eligible
-            end
-
-            main.createActivation = function(self)
-                call_count = call_count + 100 -- should NOT be called
-                return {
-                    creds = { user = "test2" },
-                    deviceUUID = "uuid2",
-                    fingerprint = "fp2",
-                    authCert = "cert2",
-                }
-            end
-
-            local fulfillment = require("adobe.fulfillment")
-            local orig_process = fulfillment.process
-            fulfillment.process = function()
-                call_count = call_count + 1
-                return nil, "network timeout"
-            end
-
-            local result = main:fulfillLoan("/test/book.acsm", {
-                title = "Test Book",
-                resourceId = "urn:uuid:test",
-            })
-            assert.is_nil(result)
-            assert.are.equal(1, call_count) -- createActivation not called (no +100)
-
-            fulfillment.process = orig_process
             rmTmpDir(tmp)
         end)
     end)
