@@ -4,6 +4,10 @@ local ffi = require("ffi")
 
 local isAndroid = pcall(require, "android")
 
+-- LuaJIT keeps the first declaration of each C function process-wide. Other
+-- plugins (e.g. FastDict) declare inflate* with their own z_stream type. Use
+-- private FFI names bound to the same native symbols so neither load order
+-- changes the pointer types expected by ACSM or those plugins (issue #27).
 ffi.cdef([[
 typedef void *voidpf;
 typedef unsigned char Bytef;
@@ -35,9 +39,9 @@ typedef struct z_stream_s {
 } z_stream;
 
 const char *zlibVersion(void);
-int inflateInit2_(z_stream *strm, int windowBits, const char *version, int stream_size);
-int inflate(z_stream *strm, int flush);
-int inflateEnd(z_stream *strm);
+int acsm_inflateInit2_(z_stream *strm, int windowBits, const char *version, int stream_size) __asm__("inflateInit2_");
+int acsm_inflate(z_stream *strm, int flush) __asm__("inflate");
+int acsm_inflateEnd(z_stream *strm) __asm__("inflateEnd");
 ]])
 
 --- Resolve the system library directory for a given architecture.
@@ -116,7 +120,7 @@ function zlib.inflateRaw(data)
     stream[0].next_in = ffi.cast("Bytef *", data)
     stream[0].avail_in = #data
 
-    local rc = libz.inflateInit2_(stream, -15, libz.zlibVersion(), ffi.sizeof(stream[0]))
+    local rc = libz.acsm_inflateInit2_(stream, -15, libz.zlibVersion(), ffi.sizeof(stream[0]))
     if rc ~= Z_OK then
         return nil, "inflateInit2 failed: " .. tostring(rc)
     end
@@ -128,7 +132,7 @@ function zlib.inflateRaw(data)
         stream[0].next_out = outbuf
         stream[0].avail_out = CHUNK_SIZE
 
-        rc = libz.inflate(stream, Z_NO_FLUSH)
+        rc = libz.acsm_inflate(stream, Z_NO_FLUSH)
         local produced = CHUNK_SIZE - tonumber(stream[0].avail_out)
         if produced > 0 then
             chunks[#chunks + 1] = ffi.string(outbuf, produced)
@@ -137,12 +141,12 @@ function zlib.inflateRaw(data)
         if rc == Z_STREAM_END then
             break
         elseif rc ~= Z_OK and not (rc == Z_BUF_ERROR and produced > 0) then
-            libz.inflateEnd(stream)
+            libz.acsm_inflateEnd(stream)
             return nil, "inflate failed: " .. tostring(rc)
         end
     end
 
-    libz.inflateEnd(stream)
+    libz.acsm_inflateEnd(stream)
     return table.concat(chunks)
 end
 
@@ -153,7 +157,7 @@ end
 -- Peak memory per update: 32KB output buffer (reused).
 function zlib.rawInflater()
     local stream = ffi.new("z_stream[1]")
-    local rc = libz.inflateInit2_(stream, -15, libz.zlibVersion(), ffi.sizeof(stream[0]))
+    local rc = libz.acsm_inflateInit2_(stream, -15, libz.zlibVersion(), ffi.sizeof(stream[0]))
     if rc ~= Z_OK then
         return nil, "inflateInit2 failed: " .. tostring(rc)
     end
@@ -164,7 +168,7 @@ end
 --- Create a streaming zlib inflater (handles zlib header, not raw deflate).
 function zlib.inflater()
     local stream = ffi.new("z_stream[1]")
-    local rc = libz.inflateInit2_(stream, 15, libz.zlibVersion(), ffi.sizeof(stream[0]))
+    local rc = libz.acsm_inflateInit2_(stream, 15, libz.zlibVersion(), ffi.sizeof(stream[0]))
     if rc ~= Z_OK then
         return nil, "inflateInit2 failed: " .. tostring(rc)
     end
@@ -192,7 +196,7 @@ function buildInflater(stream)
             stream[0].next_out = outbuf
             stream[0].avail_out = CHUNK_SIZE
 
-            local rc = libz.inflate(stream, Z_NO_FLUSH)
+            local rc = libz.acsm_inflate(stream, Z_NO_FLUSH)
             local produced = CHUNK_SIZE - tonumber(stream[0].avail_out)
             if produced > 0 and sink then
                 local ok, err = sink(outbuf, produced)
@@ -206,7 +210,7 @@ function buildInflater(stream)
                 break
             end
             if rc ~= Z_OK and (rc ~= Z_BUF_ERROR or produced == 0) then
-                libz.inflateEnd(stream)
+                libz.acsm_inflateEnd(stream)
                 return nil, "inflate failed: " .. tostring(rc)
             end
         end
@@ -215,7 +219,7 @@ function buildInflater(stream)
 
     function inflater:finalize()
         if not finished then
-            libz.inflateEnd(stream)
+            libz.acsm_inflateEnd(stream)
         end
         finished = true
     end
