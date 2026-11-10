@@ -44,6 +44,17 @@ end
 local data = "zlib load order"
 local wrapped = require("ffi/zlib").zlib_compress(data)
 local raw = wrapped:sub(3, -5) -- strip the zlib header and Adler-32 trailer
+
+-- rawInflater is the conversion path that failed in issue #27.
+local inflater = assert(zlib.rawInflater())
+local chunks = {}
+assert(inflater:update(raw, #raw, function(ptr, len)
+    chunks[#chunks + 1] = ffi.string(ptr, len)
+    return true
+end))
+inflater:finalize()
+assert(table.concat(chunks) == data)
+
 assert(zlib.inflateRaw(raw) == data)
 
 -- The other plugin must keep working too, including when ACSM loads first.
