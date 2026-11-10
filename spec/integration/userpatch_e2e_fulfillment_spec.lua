@@ -84,8 +84,10 @@ describe("ACSM patch + real fulfillment #e2e", function()
 
         --- Configure the real plugin instance for an isolated, non-reuse run.
         local plugin = FileManager.instance.acsm
+        koutil.makePath(tmpDir .. "/settings")
         plugin.settings_file = tmpDir .. "/settings/acsm.lua"
         plugin.settings = nil -- force reload from new path
+        plugin:loadSettings()
         plugin.reuse_existing = false
         plugin.open_after_download = false
 
